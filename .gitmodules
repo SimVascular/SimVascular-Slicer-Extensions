@@ -1,0 +1,3 @@
+[submodule "svMorphSlicerExtension"]
+	path = svMorphSlicerExtension
+	url = https://github.com/SimVascular/svMorphSlicerExtension
