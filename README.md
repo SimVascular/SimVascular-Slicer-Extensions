@@ -1,10 +1,3 @@
-# SimVascular Slicer Extensions
-This is the parent repository that houses all the SlicerSimVascular extensions developed by Marsden lab members and associates.
+# SimVascular extension for 3D Slicer
 
-# svMorph Slicer Extension
-This is the repository that houses the code for the svMorph Slicer extension, it is listed under the current repo as a submodule.
-
-# SeqSeg Slicer Extension
-This will be the repository that houses the code for the SeqSeg Slicer extension, it will be listed under the current repo as a submodule.
-
-# Additional Extensions, etc.
+This repository contains 3D Slicer modules for SimVascular developed by Marsden lab members and associates.
