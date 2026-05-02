@@ -32,7 +32,8 @@ class DeployStent(ScriptedLoadableModule):
         self.parent.contributors = [
             "Andras Lasso (PerkLab, Queen's University)",
             "Jeff Bohan Li (Cardiovascular Biomechanics Computation Lab, Stanford)",
-            "Matthew A. Jolley (CHOP)", "Alison Marsden (Cardiovascular Biomechanics Computation Lab, Stanford)" ]
+            "Matthew A. Jolley (CHOP)",
+            "Alison Marsden (Cardiovascular Biomechanics Computation Lab, Stanford)" ]
         self.parent.helpText = _("""
 Expand vessel to simulate stent deployment.
 Centerline is required as input, which can be generated using SlicerVMTK extension's Extract Centerline module.

@@ -7,9 +7,9 @@ project(SimVascular)
 set(EXTENSION_HOMEPAGE "https://github.com/SimVascular/SlicerSimVascular")
 set(EXTENSION_CONTRIBUTORS "Alison Marsden (Cardiovascular Biomechanics Computation Lab, Stanford University), Bohan Jeff Li (Cardiovascular Biomechanics Computation Lab, Stanford University)")
 set(EXTENSION_DESCRIPTION "SimVascular extensions developed by Marsden lab members and associates for 3D Slicer.")
-set(EXTENSION_ICONURL "https://github.com/SimVascular/SlicerSimVascular/raw/master/SimVascular.png")
+set(EXTENSION_ICONURL "https://github.com/SimVascular/SlicerSimVascular/raw/main/SimVascular.png")
 # TODO: Update with real screenshot URL
-set(EXTENSION_SCREENSHOTURLS "https://github.com/SimVascular/SlicerSimVascular/raw/master/Docs/DeployStent01.jpg https://github.com/SimVascular/SlicerSimVascular/raw/master/Docs/DeployStent02.jpg")
+set(EXTENSION_SCREENSHOTURLS "https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/DeployStent01.jpg https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/DeployStent02.jpg")
 set(EXTENSION_DEPENDS "NA") # Specified as a list or "NA" if no dependencies
 
 #-----------------------------------------------------------------------------
