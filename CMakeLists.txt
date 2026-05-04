@@ -9,7 +9,7 @@ set(EXTENSION_CONTRIBUTORS "Alison Marsden (Cardiovascular Biomechanics Computat
 set(EXTENSION_DESCRIPTION "SimVascular extensions developed by Marsden lab members and associates for 3D Slicer.")
 set(EXTENSION_ICONURL "https://github.com/SimVascular/SlicerSimVascular/raw/main/SimVascular.png")
 # TODO: Update with real screenshot URL
-set(EXTENSION_SCREENSHOTURLS "https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/DeployStent01.jpg https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/DeployStent02.jpg")
+set(EXTENSION_SCREENSHOTURLS "https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/SDFStent01.jpg https://github.com/SimVascular/SlicerSimVascular/raw/main/Docs/SDFStent02.jpg")
 set(EXTENSION_DEPENDS "NA") # Specified as a list or "NA" if no dependencies
 
 #-----------------------------------------------------------------------------
@@ -19,7 +19,7 @@ include(${Slicer_USE_FILE})
 
 #-----------------------------------------------------------------------------
 # Extension modules
-add_subdirectory(DeployStent)
+add_subdirectory(SDFStent)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------

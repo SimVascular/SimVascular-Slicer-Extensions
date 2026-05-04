@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
- <class>DeployStent</class>
- <widget class="qMRMLWidget" name="DeployStent">
+ <class>SDFStent</class>
+ <widget class="qMRMLWidget" name="SDFStent">
   <property name="geometry">
    <rect>
     <x>0</x>
@@ -457,7 +457,7 @@
  <resources/>
  <connections>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>inputSurfaceSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -473,7 +473,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>inputCenterlineSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -489,7 +489,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>centerPointMarkupSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -505,7 +505,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>outputSurfaceSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -521,7 +521,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>outputCenterlineSelector</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>
@@ -537,7 +537,7 @@
    </hints>
   </connection>
   <connection>
-   <sender>DeployStent</sender>
+   <sender>SDFStent</sender>
    <signal>mrmlSceneChanged(vtkMRMLScene*)</signal>
    <receiver>startPointPlaceWidget</receiver>
    <slot>setMRMLScene(vtkMRMLScene*)</slot>

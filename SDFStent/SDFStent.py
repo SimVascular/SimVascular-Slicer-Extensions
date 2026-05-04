@@ -23,10 +23,10 @@ from slicer.parameterNodeWrapper import (
 from slicer import vtkMRMLMarkupsCurveNode, vtkMRMLMarkupsFiducialNode, vtkMRMLMarkupsNode, vtkMRMLModelNode, vtkMRMLNode, vtkMRMLSegmentationNode
 
 
-class DeployStent(ScriptedLoadableModule):
+class SDFStent(ScriptedLoadableModule):
     def __init__(self, parent):
         ScriptedLoadableModule.__init__(self, parent)
-        self.parent.title = _("Deploy Stent")
+        self.parent.title = _("Virtual Stent (SDFStent)")
         self.parent.categories = [translate("qSlicerAbstractCoreModule", "SimVascular")]
         self.parent.dependencies = []
         self.parent.contributors = [
@@ -78,7 +78,7 @@ def registerSampleData():
 
 
 @parameterNodeWrapper
-class DeployStentParameterNode:
+class SDFStentParameterNode:
     inputVesselSegmentation: Optional[vtkMRMLSegmentationNode] = None
     inputVesselSegmentId: str = ""
     inputCenterlineCurve: Optional[vtkMRMLNode] = None
@@ -97,7 +97,7 @@ class DeployStentParameterNode:
     actualRadius: Annotated[float, WithinRange(0.0, 30.0)] = 0.0
 
 
-class DeployStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
+class SDFStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def __init__(self, parent=None) -> None:
         ScriptedLoadableModuleWidget.__init__(self, parent)
         VTKObservationMixin.__init__(self)
@@ -111,12 +111,12 @@ class DeployStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def setup(self) -> None:
         ScriptedLoadableModuleWidget.setup(self)
-        uiWidget = slicer.util.loadUI(self.resourcePath("UI/DeployStent.ui"))
+        uiWidget = slicer.util.loadUI(self.resourcePath("UI/SDFStent.ui"))
         self.layout.addWidget(uiWidget)
         self.ui = slicer.util.childWidgetVariables(uiWidget)
         uiWidget.setMRMLScene(slicer.mrmlScene)
 
-        self.logic = DeployStentLogic()
+        self.logic = SDFStentLogic()
 
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
         self.addObserver(slicer.mrmlScene, slicer.mrmlScene.EndCloseEvent, self.onSceneEndClose)
@@ -262,7 +262,7 @@ class DeployStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         if self.ui.updateButton.checkState == qt.Qt.Checked and not self._isProcessing and self.ui.updateButton.enabled:
             self.onApplyButton()
 
-    def setParameterNode(self, inputParameterNode: DeployStentParameterNode | None) -> None:
+    def setParameterNode(self, inputParameterNode: SDFStentParameterNode | None) -> None:
         if self._parameterNode:
             self._parameterNode.disconnectGui(self._parameterNodeGuiTag)
             self.removeObserver(self._parameterNode, vtk.vtkCommand.ModifiedEvent, self._onParameterNodeModified)
@@ -430,10 +430,10 @@ class DeployStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
                 actualRadius = self._parameterNode.actualRadius if self._parameterNode else 0.0
                 self._setStatus(_("Completed (R={radius:.2f} mm)").format(radius=actualRadius))
-            except DeployStentRestartError:
+            except SDFStentRestartError:
                 self._appendLog(_("Parameters changed, restarting deployment..."))
                 self._setStatus(_("Restarting..."))
-            except DeployStentCancelledError:
+            except SDFStentCancelledError:
                 cancelledByUser = True
                 self._appendLog(_("Deployment cancelled by user."))
                 self._setStatus(_("Cancelled"))
@@ -461,15 +461,15 @@ class DeployStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                             self._autoUpdateIfEnabled()
 
 
-class DeployStentCancelledError(RuntimeError):
+class SDFStentCancelledError(RuntimeError):
     pass
 
 
-class DeployStentRestartError(RuntimeError):
+class SDFStentRestartError(RuntimeError):
     pass
 
 
-class DeployStentLogic(ScriptedLoadableModuleLogic):
+class SDFStentLogic(ScriptedLoadableModuleLogic):
     def __init__(self) -> None:
         ScriptedLoadableModuleLogic.__init__(self)
         self._cancelRequested = False
@@ -481,7 +481,7 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
         self._cancelRequested = True
 
     def getParameterNode(self):
-        return DeployStentParameterNode(super().getParameterNode())
+        return SDFStentParameterNode(super().getParameterNode())
 
     def _scaledPolyData(self, polyData: vtk.vtkPolyData, scaleFactor: float) -> vtk.vtkPolyData:
         transform = vtk.vtkTransform()
@@ -772,7 +772,7 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
             logging.info(f"Starting fresh deployment: start_R={startRadiusCm:.4f} cm, target_R={targetRadiusCm:.4f} cm")
 
         # --- Deployment loop ---
-        workDir = tempfile.mkdtemp(prefix="DeployStent_") if (enableSnapshots or preserveTemporaryFiles) else None
+        workDir = tempfile.mkdtemp(prefix="SDFStent_") if (enableSnapshots or preserveTemporaryFiles) else None
         shouldDeleteTemporaryFiles = not preserveTemporaryFiles
         try:
             snapshotMgr = None
@@ -795,7 +795,7 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
             t0 = time.time()
             while True:
                 if self._cancelRequested:
-                    raise DeployStentCancelledError("Deployment cancelled by user")
+                    raise SDFStentCancelledError("Deployment cancelled by user")
 
                 currentCenterPos = [0.0, 0.0, 0.0]
                 if centerPointMarkup.GetNumberOfControlPoints() > 0:
@@ -805,7 +805,7 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
                     or float(parameterNode.stentLength) != stentLength
                     or currentCenterPos != centerPointPositionWorld
                 ):
-                    raise DeployStentRestartError("Parameters changed during deployment")
+                    raise SDFStentRestartError("Parameters changed during deployment")
 
                 latestTargetCm = float(parameterNode.targetRadius) * self._mmToCm
                 if latestTargetCm > targetRadiusCm:
@@ -856,7 +856,7 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
 
             parameterNode.actualRadius = ptCache[-1][0] * self._cmToMm
             elapsedMs = startTime.msecsTo(qt.QDateTime.currentDateTimeUtc())
-            logging.info(f"DeployStent completed in {elapsedMs / 1000.0:.2f} seconds")
+            logging.info(f"SDFStent completed in {elapsedMs / 1000.0:.2f} seconds")
             return outputSurfaceNode, outputCenterlineNode
         finally:
             if workDir:
@@ -868,16 +868,16 @@ class DeployStentLogic(ScriptedLoadableModuleLogic):
                         processMessageCallback(f"Preserved temporary files in: {workDir}", False)
 
 
-class DeployStentTest(ScriptedLoadableModuleTest):
+class SDFStentTest(ScriptedLoadableModuleTest):
     def setUp(self):
         slicer.mrmlScene.Clear()
 
     def runTest(self):
         self.setUp()
-        self.test_DeployStent_smoke()
+        self.test_SDFStent_smoke()
 
-    def test_DeployStent_smoke(self):
-        self.delayDisplay("Starting DeployStent smoke test")
+    def test_SDFStent_smoke(self):
+        self.delayDisplay("Starting SDFStent smoke test")
 
         surfaceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "surface")
         centerlineNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "centerline")
@@ -889,12 +889,12 @@ class DeployStentTest(ScriptedLoadableModuleTest):
         centerlineNode.SetAndObservePolyData(line.GetOutput())
 
         import sys
-        moduleDir = os.path.dirname(slicer.util.modulePath("DeployStent"))
+        moduleDir = os.path.dirname(slicer.util.modulePath("SDFStent"))
         if moduleDir not in sys.path:
             sys.path.insert(0, moduleDir)
         from svmorph.scripts import deploy_stent
         self.assertTrue(hasattr(deploy_stent, "main"))
-        logic = DeployStentLogic()
+        logic = SDFStentLogic()
         self.assertIsNotNone(logic)
 
-        self.delayDisplay("DeployStent smoke test passed")
+        self.delayDisplay("SDFStent smoke test passed")

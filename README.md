@@ -2,11 +2,11 @@
 
 This repository provides 3D Slicer modules for [SimVascular](https://github.com/SimVascular/SimVascular) developed by Marsden lab members and associates.
 
-![](Docs/DeployStent01.jpg)
+![](Docs/SDFStent01.jpg)
 
 ## Modules
 
-- [Deploy Stent](Docs/DeployStent.md): Expand vessel to simulate stent deployment using svMorph.
+- [Virtual Stent (SDFStent)](Docs/SDFStent.md): Expand vessel to simulate stent deployment using SDFStent algorithm (provided by svMorph Python package).
 
 ## How to cite?
 
