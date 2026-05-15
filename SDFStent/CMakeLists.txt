@@ -8,6 +8,7 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png
+  Resources/Scripts/${MODULE_NAME}_worker.py
   Resources/UI/${MODULE_NAME}.ui
   )
 

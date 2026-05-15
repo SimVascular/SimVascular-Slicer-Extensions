@@ -347,6 +347,10 @@ class SDFStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                 self._setStatus(_("Running: {line}").format(line=line[:120]))
 
     def _ensureSvmorphInstalled(self) -> None:
+        if self.logic._useExternalPythonEnv():
+            # Using external Python environment, no need to install svmorph in it
+            return
+
         if self._svmorphEnsured:
             return
 
@@ -643,6 +647,44 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         stentLengthCm = float(stentLength) * self._mmToCm
         saveStepCm = float(saveStep) * self._mmToCm if enableSnapshots else None
 
+        outputSurfaceNodeName = "deployed_surface"
+        outputCenterlineNodeName = "deployed_centerline"
+        outputSurfaceNode = self._ensureOutputModelNode(outputSurfaceModel, outputSurfaceNodeName)
+        outputCenterlineNode = self._ensureOutputModelNode(outputCenterlineModel, outputCenterlineNodeName)
+
+        inputSurfacePolyData = self._getSegmentClosedSurfacePolyData(inputVesselSegmentation, inputVesselSegmentId)
+        inputCenterlinePolyData = self._getCenterlinePolyData(inputCenterlineCurve)
+        inputSurfacePolyDataCm = self._scaledPolyData(inputSurfacePolyData, self._mmToCm)
+        inputCenterlinePolyDataCm = self._scaledPolyData(inputCenterlinePolyData, self._mmToCm)
+
+        if not inputSurfacePolyDataCm or inputSurfacePolyDataCm.GetNumberOfPoints() == 0:
+            raise ValueError("Input surface model has no polydata")
+
+        centerPointPositionWorld = [0.0, 0.0, 0.0]
+        centerPointMarkup.GetNthControlPointPositionWorld(0, centerPointPositionWorld)
+        centerPointPositionWorldCm = [c * self._mmToCm for c in centerPointPositionWorld]
+        startPointId = self._startPointIdFromCenterAndLength(inputCenterlinePolyDataCm, centerPointPositionWorldCm, stentLengthCm)
+
+        if self._useExternalPythonEnv():
+            pythonExePath = self._getMacOSExternalPythonPath(processMessageCallback)
+            return self._processWithExternalPython(
+                pythonCmd=["arch", "-arm64", pythonExePath],
+                inputSurfacePolyDataMm=inputSurfacePolyData,
+                inputCenterlinePolyDataMm=inputCenterlinePolyData,
+                startPointId=startPointId,
+                targetRadius=targetRadius,
+                startRadius=startRadius,
+                stentLength=stentLength,
+                enableSnapshots=enableSnapshots,
+                verboseLogging=verboseLogging,
+                saveStep=saveStep,
+                preserveTemporaryFiles=preserveTemporaryFiles,
+                outputSurfaceModel=outputSurfaceNode,
+                outputCenterlineModel=outputCenterlineNode,
+                processMessageCallback=processMessageCallback,
+            )
+
+        # --- In-process path: import svmorph and run ---
         import sys
         moduleDir = os.path.dirname(__file__)
         if moduleDir not in sys.path:
@@ -657,24 +699,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         set_unit_scale(1.0)  # working in cm
         svmorph_setup_logging(TIMING if verboseLogging else logging.INFO)
 
-        outputSurfaceNodeName = "deployed_surface"
-        outputCenterlineNodeName = "deployed_centerline"
-        outputSurfaceNode = self._ensureOutputModelNode(outputSurfaceModel, outputSurfaceNodeName)
-        outputCenterlineNode = self._ensureOutputModelNode(outputCenterlineModel, outputCenterlineNodeName)
-
         # --- Determine whether we can reuse the cached deployment state ---
-        inputSurfacePolyData = self._getSegmentClosedSurfacePolyData(inputVesselSegmentation, inputVesselSegmentId)
-        inputCenterlinePolyData = self._getCenterlinePolyData(inputCenterlineCurve)
-        inputSurfacePolyDataCm = self._scaledPolyData(inputSurfacePolyData, self._mmToCm)
-        inputCenterlinePolyDataCm = self._scaledPolyData(inputCenterlinePolyData, self._mmToCm)
-
-        if not inputSurfacePolyDataCm or inputSurfacePolyDataCm.GetNumberOfPoints() == 0:
-            raise ValueError("Input surface model has no polydata")
-
-        centerPointPositionWorld = [0.0, 0.0, 0.0]
-        centerPointMarkup.GetNthControlPointPositionWorld(0, centerPointPositionWorld)
-        centerPointPositionWorldCm = [c * self._mmToCm for c in centerPointPositionWorld]
-        startPointId = self._startPointIdFromCenterAndLength(inputCenterlinePolyDataCm, centerPointPositionWorldCm, stentLengthCm)
 
         stateKey = (
             inputVesselSegmentation.GetID(),
@@ -866,6 +891,191 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                     logging.info(f"Preserved temporary files in: {workDir}")
                     if processMessageCallback:
                         processMessageCallback(f"Preserved temporary files in: {workDir}", False)
+
+
+    def _useExternalPythonEnv(self) -> bool:
+        # jax is not available in on Apple Silicon in x86_64 executables (using Rosetta2 translation).
+        # Therefore, for these cases we need to use an external Python environment for the computations.
+        import sys
+        if sys.platform != "darwin":
+            return False
+        import subprocess
+        result = subprocess.run(["sysctl", "-n", "sysctl.proc_translated"], capture_output=True, text=True)
+        return result.stdout.strip() == "1"
+
+    def _getMacOSExternalPythonPath(self, processMessageCallback=None) -> str:
+        import subprocess
+        envDir = pathlib.Path.home() / ".SlicerSimVascularPythonEnv"
+        pythonExe = envDir / "bin" / "python3"
+
+        if pythonExe.exists():
+            test = subprocess.run(
+                ["arch", "-arm64", str(pythonExe), "-c", "pass"],
+                capture_output=True, env=slicer.util.startupEnvironment(),
+            )
+            if test.returncode != 0:
+                msg = "Removing x86 Python environment and recreating with ARM Python..."
+                logging.info(msg)
+                if processMessageCallback:
+                    processMessageCallback(msg, False)
+                shutil.rmtree(str(envDir), ignore_errors=True)
+
+        if not pythonExe.exists():
+            msg = f"Creating ARM Python environment at {envDir}..."
+            logging.info(msg)
+            if processMessageCallback:
+                processMessageCallback(msg, False)
+            result = subprocess.run(
+                ["arch", "-arm64", "/usr/bin/python3", "-m", "venv", str(envDir)],
+                capture_output=True, text=True, env=slicer.util.startupEnvironment(),
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Failed to create ARM Python virtual environment at {envDir}.\n{result.stderr}\n"
+                    "Make sure /usr/bin/python3 supports ARM (install Xcode Command Line Tools)."
+                )
+            logging.info(f"ARM Python environment created at {envDir}")
+        return str(pythonExe)
+
+    def _ensureExternalDependencies(self, pythonCmd: list, env: dict, processMessageCallback) -> None:
+        import subprocess
+        required = [("svmorph", "svmorph")]
+        for importName, pipName in required:
+            check = subprocess.run(
+                pythonCmd + ["-c", f"import {importName}"],
+                capture_output=True, text=True, env=env,
+            )
+            if check.returncode == 0:
+                continue
+            msg = f"Installing {pipName} in external Python environment..."
+            logging.info(msg)
+            if processMessageCallback:
+                processMessageCallback(msg, False)
+            proc = subprocess.Popen(
+                pythonCmd + ["-m", "pip", "install", pipName],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line and processMessageCallback:
+                    processMessageCallback(line, False)
+                slicer.app.processEvents()
+            proc.wait()
+            if proc.returncode != 0:
+                raise RuntimeError(f"Failed to install '{pipName}' in the external Python environment.")
+            logging.info(f"Successfully installed {pipName}.")
+            if processMessageCallback:
+                processMessageCallback(f"Successfully installed {pipName}.", False)
+
+    def _processWithExternalPython(
+        self,
+        pythonCmd: list,
+        inputSurfacePolyDataMm: vtk.vtkPolyData,
+        inputCenterlinePolyDataMm: vtk.vtkPolyData,
+        startPointId: int,
+        targetRadius: float,
+        startRadius: float,
+        stentLength: float,
+        enableSnapshots: bool,
+        verboseLogging: bool,
+        saveStep: float,
+        preserveTemporaryFiles: bool,
+        outputSurfaceModel: vtkMRMLModelNode,
+        outputCenterlineModel: vtkMRMLModelNode,
+        processMessageCallback=None,
+    ) -> tuple[vtkMRMLModelNode, vtkMRMLModelNode]:
+        import json
+        import subprocess
+
+        workDir = tempfile.mkdtemp(prefix="SDFStent_")
+        shouldDeleteTemporaryFiles = not preserveTemporaryFiles
+        try:
+            workDirPath = pathlib.Path(workDir)
+
+            surfaceWriter = vtk.vtkXMLPolyDataWriter()
+            surfaceWriter.SetFileName(str(workDirPath / "surface_input.vtp"))
+            surfaceWriter.SetInputData(inputSurfacePolyDataMm)
+            surfaceWriter.Write()
+
+            centerlineWriter = vtk.vtkXMLPolyDataWriter()
+            centerlineWriter.SetFileName(str(workDirPath / "centerline_input.vtp"))
+            centerlineWriter.SetInputData(inputCenterlinePolyDataMm)
+            centerlineWriter.Write()
+
+            params = {
+                "targetRadius": targetRadius,
+                "startRadius": startRadius,
+                "stentLength": stentLength,
+                "startPointId": startPointId,
+                "verboseLogging": verboseLogging,
+                "enableSnapshots": enableSnapshots,
+                "saveStep": saveStep,
+            }
+            with open(workDirPath / "params.json", "w") as f:
+                json.dump(params, f)
+
+            env = slicer.util.startupEnvironment()
+            self._ensureExternalDependencies(pythonCmd, env, processMessageCallback)
+
+            if processMessageCallback:
+                processMessageCallback("Launching ARM Python worker...", False)
+            workerScript = os.path.join(os.path.dirname(__file__), "Resources", "Scripts", "SDFStent_worker.py")
+            proc = subprocess.Popen(
+                pythonCmd + [workerScript, workDir],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+
+            for line in proc.stdout:
+                line = line.rstrip()
+                if self._cancelRequested:
+                    proc.terminate()
+                    proc.wait()
+                    raise SDFStentCancelledError("Deployment cancelled by user")
+                if line and processMessageCallback:
+                    processMessageCallback(line, False)
+                slicer.app.processEvents()
+
+            proc.wait()
+
+            if self._cancelRequested:
+                raise SDFStentCancelledError("Deployment cancelled by user")
+
+            resultPath = workDirPath / "result.json"
+            if resultPath.exists():
+                with open(resultPath) as f:
+                    result = json.load(f)
+                if not result.get("success"):
+                    raise RuntimeError(f"Worker failed: {result.get('error', 'unknown error')}")
+                self.getParameterNode().actualRadius = float(result.get("actualRadius", 0.0))
+            else:
+                raise RuntimeError(f"Worker exited with code {proc.returncode} and produced no result file")
+
+            surfaceReader = vtk.vtkXMLPolyDataReader()
+            surfaceReader.SetFileName(str(workDirPath / "surface_output.vtp"))
+            surfaceReader.Update()
+
+            centerlineReader = vtk.vtkXMLPolyDataReader()
+            centerlineReader.SetFileName(str(workDirPath / "centerline_output.vtp"))
+            centerlineReader.Update()
+
+            self._setDisplayedPolyData(outputSurfaceModel, surfaceReader.GetOutput(), defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
+            self._setDisplayedPolyData(outputCenterlineModel, centerlineReader.GetOutput())
+            return outputSurfaceModel, outputCenterlineModel
+        finally:
+            if shouldDeleteTemporaryFiles:
+                shutil.rmtree(workDir, ignore_errors=True)
+            else:
+                logging.info(f"Preserved temporary files in: {workDir}")
+                if processMessageCallback:
+                    processMessageCallback(f"Preserved temporary files in: {workDir}", False)
 
 
 class SDFStentTest(ScriptedLoadableModuleTest):
