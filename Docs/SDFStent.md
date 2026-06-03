@@ -1,4 +1,4 @@
-# Virtual Cath Lab
+# Virtual Stent (SDFStent)
 
 ## Summary
 
