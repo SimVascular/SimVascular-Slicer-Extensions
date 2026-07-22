@@ -20,6 +20,7 @@ include(${Slicer_USE_FILE})
 #-----------------------------------------------------------------------------
 # Extension modules
 add_subdirectory(SDFStent)
+add_subdirectory(PaintModel)
 ## NEXT_MODULE
 
 #-----------------------------------------------------------------------------
