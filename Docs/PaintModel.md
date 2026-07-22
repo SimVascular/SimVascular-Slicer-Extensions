@@ -18,7 +18,7 @@ into flat-ish regions using a dihedral-angle threshold, then refine those
 regions by hand with a selection brush, growing/inverting/clearing the
 selection, and splitting off new groups.
 
-![](PaintModel01.jpg)
+![](PaintModel01.png)
 
 *A clipped Fontan vascular geometry, before any face groups have been
 created.*
@@ -36,7 +36,7 @@ created.*
 - Click `Create face groups`. Each group is rendered with a stable color;
   the status label reports how many groups were created.
 
-![](PaintModel02.jpg)
+![](PaintModel02.png)
 
 *Result of clicking `Create face groups` on the same model: the edge-angle
 threshold and minimum-size settings automatically identify the flat cap
@@ -55,7 +55,7 @@ surfaces (and other flat regions) as their own groups.*
   - Press `C` (or click `Clear selection`) to clear the selection.
   - The active selection is always highlighted in yellow.
 
-![](PaintModel03.jpg)
+![](PaintModel03.png)
 
 *The selection brush (cyan sphere) being used to manually paint a region
 that wasn't already captured as its own automatic face group — hold `S`
