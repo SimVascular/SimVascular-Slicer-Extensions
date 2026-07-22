@@ -12,6 +12,17 @@ Typical uses include marking inlet/outlet caps and named regions on a
 vascular or organ surface model before meshing or boundary-condition
 assignment.
 
+The workflow is inspired by the face-grouping tools in
+[Autodesk Meshmixer](https://meshmixer.com/): automatically segment a mesh
+into flat-ish regions using a dihedral-angle threshold, then refine those
+regions by hand with a selection brush, growing/inverting/clearing the
+selection, and splitting off new groups.
+
+![](PaintModel01.jpg)
+
+*A clipped Fontan vascular geometry, before any face groups have been
+created.*
+
 ## Tutorial
 
 - Go to the `Paint Model` module.
@@ -24,6 +35,13 @@ assignment.
   boundary.
 - Click `Create face groups`. Each group is rendered with a stable color;
   the status label reports how many groups were created.
+
+![](PaintModel02.jpg)
+
+*Result of clicking `Create face groups` on the same model: the edge-angle
+threshold and minimum-size settings automatically identify the flat cap
+surfaces (and other flat regions) as their own groups.*
+
 - In the `Paint and edit selection` panel, set the `Brush radius` used by
   the hotkeys below.
 - In the 3D view:
@@ -36,6 +54,13 @@ assignment.
     selection out into its own new face group.
   - Press `C` (or click `Clear selection`) to clear the selection.
   - The active selection is always highlighted in yellow.
+
+![](PaintModel03.jpg)
+
+*The selection brush (cyan sphere) being used to manually paint a region
+that wasn't already captured as its own automatic face group — hold `S`
+and drag to select, then click `New group from selection` to carve it out.*
+
 - When you're happy with the groups, click `Export .vtp...` and choose a
   file location. The exported model has a `ModelFaceID` cell array with
   consecutive integer labels, one per face group.
@@ -45,5 +70,3 @@ assignment.
 - Face-group data is stored directly on the model's polydata as a
   `ModelFaceID` cell array, so it persists with the model for as long as
   the scene is open (and is written out on export).
-- `PaintModel` was extracted from the "Group faces" tools originally built
-  into the 3D Slicer `SurfaceToolbox` extension.

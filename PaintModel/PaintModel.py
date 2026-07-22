@@ -30,10 +30,10 @@ create groups automatically from a dihedral-angle threshold, expand a selection
 to whole groups, carve a new group from the current selection, and export the
 result (a "ModelFaceID" cell array) as a .vtp file.
 """
-    self.parent.helpText += self.getDefaultModuleDocumentationLink()
     self.parent.acknowledgementText = """
-This module was extracted from the face-grouping tools originally added to the
-3D Slicer SurfaceToolbox extension.
+The automatic face-grouping workflow (partition by angle threshold, then
+merge small groups, then manually paint or edit groups) is inspired by the
+face-group tools in Autodesk Meshmixer.
 """
 
 #
