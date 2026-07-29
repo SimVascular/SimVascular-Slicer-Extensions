@@ -62,10 +62,15 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._brushTopologyNodeID = None
     self._brushCellNeighbors = None
     self._brushCellCentroids = None
+    self._brushUpdateTimer = None
+    self._pendingBrushPaint = None
     self._brushCursorSphere = None
     self._brushCursorModelNode = None
     self._selectionModelNode = None
     self._selectionDisplayModelNode = None
+    self._selectionDisplayArray = None
+    self._selectionDisplayGroupCount = None
+    self._selectionHighlightValue = None
     self._faceGroupColorNode = None
     self._faceGroupColorsByModel = {}
 
@@ -81,6 +86,10 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     # ModelFaceID cell data. The UI is built entirely in Python since this
     # module has no destructive filter pipeline to share a form with.
     self.setupFaceGroupsUI()
+    self._brushUpdateTimer = qt.QTimer()
+    self._brushUpdateTimer.setSingleShot(True)
+    self._brushUpdateTimer.setInterval(20)
+    self._brushUpdateTimer.connect('timeout()', self._flushPendingBrushPaint)
 
     # These connections ensure that helper nodes are cleared out when the scene closes.
     self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
@@ -115,8 +124,12 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._brushTopologyNodeID = None
     self._brushCellNeighbors = None
     self._brushCellCentroids = None
+    self._pendingBrushPaint = None
     self._selectionModelNode = None
     self._selectionDisplayModelNode = None
+    self._selectionDisplayArray = None
+    self._selectionDisplayGroupCount = None
+    self._selectionHighlightValue = None
     self._faceGroupColorNode = None
     self._brushCursorModelNode = None
     self._brushCursorSphere = None
@@ -233,6 +246,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       groupCount = self.logic.createFaceGroups(
         modelNode, float(self.faceGroupAngleSlider.value), int(self.faceGroupSizeSpinBox.value))
       self._faceGroupSelection.clear()
+      self._clearSelectionDisplay(modelNode)
       self.showFaceGroupColors(modelNode, groupCount)
       self.updateSelectionOverlay()
       self.faceGroupStatusLabel.text = f"Created {groupCount} face groups on {modelNode.GetPolyData().GetNumberOfCells()} cells"
@@ -361,6 +375,9 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self._brushInteractorCallbacks.extend(callbacks)
 
   def _removeBrushObservers(self):
+    if self._brushUpdateTimer:
+      self._brushUpdateTimer.stop()
+    self._pendingBrushPaint = None
     for interactor, tag in self._brushObserverTags:
       try:
         interactor.RemoveObserver(tag)
@@ -462,21 +479,35 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(None, modelNode.GetParentTransformNode(), worldToModel)
     return int(picker.GetCellId()), tuple(worldToModel.TransformPoint(picker.GetPickPosition())), tuple(picker.GetPickPosition())
 
-  def _paintBrush(self, threeDView, caller):
-    picked = self._pickModelCell(threeDView, *caller.GetEventPosition())
+  def _paintBrushAtPosition(self, threeDView, eventPosition):
+    picked = self._pickModelCell(threeDView, *eventPosition)
     if not picked:
       self._refreshBrushCursor(None)
       return
     seedCellId, localPosition, worldPosition = picked
     self._refreshBrushCursor(worldPosition)
     radius = float(self.brushRadiusSpinBox.value)
-    selected = self._brushCellsInsideSphere(seedCellId, worldPosition, radius)
+    brushCells = self._brushCellsInsideSphere(seedCellId, worldPosition, radius)
     if self._brushMode == "select":
-      self._faceGroupSelection.update(selected)
+      changedCells = brushCells.difference(self._faceGroupSelection)
+      self._faceGroupSelection.update(changedCells)
     else:
-      self._faceGroupSelection.difference_update(selected)
+      changedCells = brushCells.intersection(self._faceGroupSelection)
+      self._faceGroupSelection.difference_update(changedCells)
     self._brushLastLocalPosition = localPosition
-    self.updateSelectionOverlay()
+    self._updateSelectionOverlayCells(changedCells)
+
+  def _queueBrushPaint(self, threeDView, eventPosition):
+    self._pendingBrushPaint = (threeDView, tuple(eventPosition))
+    if self._brushUpdateTimer and not self._brushUpdateTimer.isActive():
+      self._brushUpdateTimer.start()
+
+  def _flushPendingBrushPaint(self):
+    pending = self._pendingBrushPaint
+    self._pendingBrushPaint = None
+    if not pending or self._brushMode is None or not self._brushDragging:
+      return
+    self._paintBrushAtPosition(*pending)
 
   def onBrushInteractorEvent(self, threeDView, eventName, caller, event):
     if not self._brushInteractionEnabled:
@@ -501,6 +532,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if eventName == "keyRelease":
       self._brushHotkeysDown.discard(key)
       if key in ("s", "d"):
+        self._flushPendingBrushPaint()
         self._brushMode = "select" if "s" in self._brushHotkeysDown else ("deselect" if "d" in self._brushHotkeysDown else None)
         if self._brushMode is None:
           self._brushDragging = False
@@ -510,15 +542,19 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     if self._brushMode is None:
       return
     if eventName == "press":
+      if self._brushUpdateTimer:
+        self._brushUpdateTimer.stop()
+      self._pendingBrushPaint = None
       self._brushDragging = True
-      self._paintBrush(threeDView, caller)
+      self._paintBrushAtPosition(threeDView, caller.GetEventPosition())
     elif eventName == "move":
       if self._brushDragging:
-        self._paintBrush(threeDView, caller)
+        self._queueBrushPaint(threeDView, caller.GetEventPosition())
       else:
         picked = self._pickModelCell(threeDView, *caller.GetEventPosition())
         self._refreshBrushCursor(picked[2] if picked else None)
     elif eventName in ("release", "leave"):
+      self._flushPendingBrushPaint()
       self._brushDragging = False
       self._brushLastLocalPosition = None
       self._refreshBrushCursor(None)
@@ -560,20 +596,44 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self.faceGroupStatusLabel.text = "No cells selected"
       return
 
+    displayIds, faceIds = self._ensureSelectionDisplay(modelNode)
+    if not displayIds:
+      return
     polyData = modelNode.GetPolyData()
+    for cellId in range(polyData.GetNumberOfCells()):
+      baseValue = int(faceIds.GetTuple1(cellId)) if faceIds else 0
+      displayIds.SetValue(
+        cellId, self._selectionHighlightValue if cellId in self._faceGroupSelection else baseValue)
+    self._markSelectionDisplayModified(modelNode)
+    self._updateSelectionStatus()
+
+  def _ensureSelectionDisplay(self, modelNode):
+    if not modelNode or not modelNode.GetPolyData():
+      return None, None
+    if self._selectionDisplayModelNode and self._selectionDisplayModelNode != modelNode:
+      self._clearSelectionDisplay(self._selectionDisplayModelNode)
+    polyData = modelNode.GetPolyData()
+    attachedArray = polyData.GetCellData().GetArray(PaintModelLogic.SELECTION_DISPLAY_ARRAY_NAME)
+    if (self._selectionDisplayModelNode == modelNode and
+        self._selectionDisplayArray is not None and
+        attachedArray == self._selectionDisplayArray and
+        attachedArray.GetNumberOfTuples() == polyData.GetNumberOfCells()):
+      return self._selectionDisplayArray, polyData.GetCellData().GetArray(
+        PaintModelLogic.FACE_GROUP_ARRAY_NAME)
+
     faceIds = polyData.GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME)
     groupCount = max(
       [int(faceIds.GetTuple1(cellId)) for cellId in range(faceIds.GetNumberOfTuples())] or [0]) if faceIds else 0
     highlightValue = groupCount + 1
     displayIds = vtk.vtkIntArray()
+    if faceIds and faceIds.GetNumberOfTuples() == polyData.GetNumberOfCells():
+      displayIds.DeepCopy(faceIds)
+    else:
+      displayIds.SetNumberOfTuples(polyData.GetNumberOfCells())
+      displayIds.Fill(0)
     displayIds.SetName(PaintModelLogic.SELECTION_DISPLAY_ARRAY_NAME)
-    displayIds.SetNumberOfTuples(polyData.GetNumberOfCells())
-    for cellId in range(polyData.GetNumberOfCells()):
-      baseValue = int(faceIds.GetTuple1(cellId)) if faceIds else 0
-      displayIds.SetValue(cellId, highlightValue if cellId in self._faceGroupSelection else baseValue)
     polyData.GetCellData().RemoveArray(PaintModelLogic.SELECTION_DISPLAY_ARRAY_NAME)
     polyData.GetCellData().AddArray(displayIds)
-
     if not modelNode.GetDisplayNode():
       modelNode.CreateDefaultDisplayNodes()
     self._faceGroupColorNode = self._faceGroupColorNodeForModel(modelNode, create=True)
@@ -586,13 +646,51 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     displayNode.SetScalarRange(0, highlightValue)
     displayNode.SetScalarVisibility(True)
     self._selectionDisplayModelNode = modelNode
-    polyData.Modified()
+    self._selectionDisplayArray = displayIds
+    self._selectionDisplayGroupCount = groupCount
+    self._selectionHighlightValue = highlightValue
+    return displayIds, faceIds
+
+  def _updateSelectionOverlayCells(self, changedCellIds):
+    modelNode = self.faceGroupModelNode() if hasattr(self, 'faceGroupModelSelector') else None
+    if not modelNode or not modelNode.GetPolyData():
+      return
+    if not changedCellIds:
+      self._updateSelectionStatus()
+      return
+    displayIds, faceIds = self._ensureSelectionDisplay(modelNode)
+    if not displayIds:
+      return
+    for cellId in changedCellIds:
+      baseValue = int(faceIds.GetTuple1(cellId)) if faceIds else 0
+      displayIds.SetValue(
+        cellId, self._selectionHighlightValue if cellId in self._faceGroupSelection else baseValue)
+    self._markSelectionDisplayModified(modelNode)
+    self._updateSelectionStatus()
+
+  def _markSelectionDisplayModified(self, modelNode):
+    self._selectionDisplayArray.Modified()
+    modelNode.GetPolyData().GetCellData().Modified()
+    modelNode.GetPolyData().Modified()
     modelNode.Modified()
-    self.faceGroupStatusLabel.text = f"{len(self._faceGroupSelection)} cells selected"
-    slicer.app.processEvents()
+    layoutManager = slicer.app.layoutManager()
+    if layoutManager:
+      for viewIndex in range(layoutManager.threeDViewCount):
+        layoutManager.threeDWidget(viewIndex).threeDView().scheduleRender()
+
+  def _updateSelectionStatus(self):
+    if not hasattr(self, 'faceGroupStatusLabel'):
+      return
+    if self._faceGroupSelection:
+      self.faceGroupStatusLabel.text = f"{len(self._faceGroupSelection)} cells selected"
+    else:
+      self.faceGroupStatusLabel.text = "No cells selected"
 
   def _clearSelectionDisplay(self, modelNode):
     if not modelNode or not modelNode.GetPolyData():
+      self._selectionDisplayArray = None
+      self._selectionDisplayGroupCount = None
+      self._selectionHighlightValue = None
       return
     polyData = modelNode.GetPolyData()
     polyData.GetCellData().RemoveArray(PaintModelLogic.SELECTION_DISPLAY_ARRAY_NAME)
@@ -615,12 +713,16 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         displayNode.SetScalarVisibility(False)
     if self._selectionDisplayModelNode == modelNode:
       self._selectionDisplayModelNode = None
+      self._selectionDisplayArray = None
+      self._selectionDisplayGroupCount = None
+      self._selectionHighlightValue = None
     polyData.Modified()
     modelNode.Modified()
 
   def clearFaceGroupSelection(self):
+    changedCells = set(self._faceGroupSelection)
     self._faceGroupSelection.clear()
-    self.updateSelectionOverlay()
+    self._updateSelectionOverlayCells(changedCells)
 
   def onInvertFaceGroupSelection(self):
     modelNode = self.faceGroupModelNode()
@@ -649,6 +751,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       slicer.util.errorDisplay("Brush-select at least one cell first.")
       return
     newId = self.logic.createGroupFromSelection(modelNode, self._faceGroupSelection)
+    self._clearSelectionDisplay(modelNode)
     array = modelNode.GetPolyData().GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME)
     maxId = max(int(array.GetTuple1(i)) for i in range(array.GetNumberOfTuples()))
     self.showFaceGroupColors(modelNode, maxId)
