@@ -174,7 +174,12 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     self.createFaceGroupsButton = qt.QPushButton("Create face groups")
     self.createFaceGroupsButton.toolTip = "Partition the model using the angle threshold, then merge groups below the size threshold"
-    form.addRow(self.createFaceGroupsButton)
+    self.clearFaceGroupsButton = qt.QPushButton("Clear face groups")
+    self.clearFaceGroupsButton.toolTip = "Remove the ModelFaceID cell array and face-group coloring from the selected model"
+    faceGroupButtonRow = qt.QHBoxLayout()
+    faceGroupButtonRow.addWidget(self.createFaceGroupsButton)
+    faceGroupButtonRow.addWidget(self.clearFaceGroupsButton)
+    form.addRow(faceGroupButtonRow)
 
     editSection = ctk.ctkCollapsibleButton()
     editSection.text = "Paint and edit selection"
@@ -218,6 +223,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     editForm.addRow(self.faceGroupStatusLabel)
 
     self.createFaceGroupsButton.connect('clicked()', self.onCreateFaceGroups)
+    self.clearFaceGroupsButton.connect('clicked()', self.onClearFaceGroups)
     self.expandFaceGroupButton.connect('clicked()', self.onExpandFaceGroups)
     self.newFaceGroupButton.connect('clicked()', self.onNewFaceGroupFromSelection)
     self.clearFaceGroupSelectionButton.connect('clicked()', self.clearFaceGroupSelection)
@@ -255,6 +261,27 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       logging.exception("Face-group creation failed")
     finally:
       qt.QApplication.restoreOverrideCursor()
+
+  def onClearFaceGroups(self):
+    modelNode = self.faceGroupModelNode()
+    if not modelNode or not modelNode.GetPolyData():
+      slicer.util.errorDisplay("Select a model in the Create face groups panel.")
+      return
+    polyData = modelNode.GetPolyData()
+    faceIds = polyData.GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME)
+    self._faceGroupSelection.clear()
+    self._clearSelectionDisplay(modelNode)
+    if not faceIds:
+      self.faceGroupStatusLabel.text = "The selected model has no face groups"
+      return
+
+    slicer.mrmlScene.SaveStateForUndo(modelNode)
+    self.logic.clearFaceGroups(modelNode)
+    displayNode = modelNode.GetDisplayNode()
+    if displayNode:
+      displayNode.SetScalarVisibility(False)
+    self.faceGroupStatusLabel.text = (
+      f"Cleared face groups from {polyData.GetNumberOfCells()} cells")
 
   def showFaceGroupColors(self, modelNode, groupCount):
     if not modelNode.GetDisplayNode():
@@ -960,6 +987,18 @@ class PaintModelLogic(ScriptedLoadableModuleLogic):
     return len(oldToNew)
 
   @staticmethod
+  def clearFaceGroups(modelNode):
+    polyData = modelNode.GetPolyData() if modelNode else None
+    if not polyData:
+      raise ValueError("The selected model has no surface")
+    hadFaceGroups = bool(
+      polyData.GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME))
+    polyData.GetCellData().RemoveArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME)
+    polyData.Modified()
+    modelNode.Modified()
+    return hadFaceGroups
+
+  @staticmethod
   def createGroupFromSelection(modelNode, selectedCellIds):
     polyData = modelNode.GetPolyData()
     array = polyData.GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME)
@@ -1085,5 +1124,10 @@ class PaintModelTest(ScriptedLoadableModuleTest):
     logic.exportFaceGroups(modelNode, outputPath)
     self.assertTrue(os.path.exists(outputPath))
     os.remove(outputPath)
+
+    self.assertTrue(logic.clearFaceGroups(modelNode))
+    self.assertIsNone(
+      modelNode.GetPolyData().GetCellData().GetArray(PaintModelLogic.FACE_GROUP_ARRAY_NAME))
+    self.assertFalse(logic.clearFaceGroups(modelNode))
 
     self.delayDisplay("test_PaintModelCreateFaceGroups passed")
