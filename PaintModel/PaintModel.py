@@ -181,19 +181,19 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.layout.addWidget(editSection)
     editForm = qt.QFormLayout(editSection)
 
-    self.brushRadiusSpinBox = ctk.ctkDoubleSpinBox()
-    self.brushRadiusSpinBox.minimum = 0.1
-    self.brushRadiusSpinBox.maximum = 1000.0
-    self.brushRadiusSpinBox.value = 5.0
-    self.brushRadiusSpinBox.decimals = 1
-    self.brushRadiusSpinBox.singleStep = 0.5
-    self.brushRadiusSpinBox.suffix = " mm"
-    self.brushRadiusSpinBox.toolTip = "Surface-connected brush radius used by the S and D hotkeys"
-    editForm.addRow("Brush radius:", self.brushRadiusSpinBox)
+    self.brushRadiusSlider = ctk.ctkSliderWidget()
+    self.brushRadiusSlider.minimum = 0.0
+    self.brushRadiusSlider.maximum = 50.0
+    self.brushRadiusSlider.value = 5.0
+    self.brushRadiusSlider.decimals = 1
+    self.brushRadiusSlider.singleStep = 0.5
+    self.brushRadiusSlider.suffix = " mm"
+    self.brushRadiusSlider.toolTip = "Surface-connected brush radius used by the S and D hotkeys"
+    editForm.addRow("Brush radius:", self.brushRadiusSlider)
 
     self.hotkeyInstructionsLabel = qt.QLabel(
       "Hotkeys: hold S + left-drag to select; hold D + left-drag to deselect; "
-      "G expand to groups; I invert; N new group; C clear")
+      "G expand to groups; I invert; N new group; C clear; E toggle edges")
     self.hotkeyInstructionsLabel.wordWrap = True
     editForm.addRow(self.hotkeyInstructionsLabel)
 
@@ -486,7 +486,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       return
     seedCellId, localPosition, worldPosition = picked
     self._refreshBrushCursor(worldPosition)
-    radius = float(self.brushRadiusSpinBox.value)
+    radius = float(self.brushRadiusSlider.value)
     brushCells = self._brushCellsInsideSphere(seedCellId, worldPosition, radius)
     if self._brushMode == "select":
       changedCells = brushCells.difference(self._faceGroupSelection)
@@ -528,6 +528,8 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
           self.onNewFaceGroupFromSelection()
         elif key == "c":
           self.clearFaceGroupSelection()
+        elif key == "e":
+          self.onToggleModelEdges()
       return
     if eventName == "keyRelease":
       self._brushHotkeysDown.discard(key)
@@ -576,7 +578,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
       self._brushCursorSphere.SetThetaResolution(24)
       self._brushCursorSphere.SetPhiResolution(24)
     self._brushCursorSphere.SetCenter(*worldPosition)
-    self._brushCursorSphere.SetRadius(float(self.brushRadiusSpinBox.value))
+    self._brushCursorSphere.SetRadius(float(self.brushRadiusSlider.value))
     self._brushCursorSphere.Update()
     self._brushCursorModelNode.SetAndObservePolyData(self._brushCursorSphere.GetOutput())
 
@@ -723,6 +725,16 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     changedCells = set(self._faceGroupSelection)
     self._faceGroupSelection.clear()
     self._updateSelectionOverlayCells(changedCells)
+
+  def onToggleModelEdges(self):
+    modelNode = self.faceGroupModelNode()
+    if not modelNode:
+      return
+    if not modelNode.GetDisplayNode():
+      modelNode.CreateDefaultDisplayNodes()
+    displayNode = modelNode.GetDisplayNode()
+    displayNode.SetEdgeVisibility(not bool(displayNode.GetEdgeVisibility()))
+    displayNode.Modified()
 
   def onInvertFaceGroupSelection(self):
     modelNode = self.faceGroupModelNode()
