@@ -2,7 +2,6 @@ import logging
 import math
 import colorsys
 import functools
-import heapq
 
 import vtk, qt, ctk, slicer
 from slicer.ScriptedLoadableModule import *
@@ -429,27 +428,19 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self._brushCellNeighbors = neighbors
     self._brushCellCentroids = centroids
 
-  def _brushFloodFromSeed(self, seedCellId, radiusMm):
+  def _brushCellsInsideSphere(self, seedCellId, brushCenterWorld, radiusMm):
+    """Return the surface-connected cells whose centroids are inside the brush sphere."""
     self._buildBrushTopology()
     if self._brushCellNeighbors is None or seedCellId < 0:
       return set()
-    visited = set()
-    selected = set()
-    queue = [(0.0, seedCellId)]
-    while queue:
-      cost, cellId = heapq.heappop(queue)
-      if cost > radiusMm or cellId in visited:
-        continue
-      visited.add(cellId)
-      selected.add(cellId)
-      center = self._brushCellCentroids[cellId]
-      for neighbor in self._brushCellNeighbors[cellId]:
-        if neighbor in visited:
-          continue
-        neighborCenter = self._brushCellCentroids[neighbor]
-        step = math.sqrt(sum((center[axis] - neighborCenter[axis]) ** 2 for axis in range(3)))
-        heapq.heappush(queue, (cost + step, neighbor))
-    return selected
+
+    modelNode = self.faceGroupModelNode()
+    modelToWorld = vtk.vtkGeneralTransform()
+    slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(
+      modelNode.GetParentTransformNode(), None, modelToWorld)
+    return PaintModelLogic.surfaceConnectedCellsInsideSphere(
+      self._brushCellNeighbors, self._brushCellCentroids, seedCellId,
+      brushCenterWorld, radiusMm, modelToWorld.TransformPoint)
 
   def _pickModelCell(self, threeDView, x, y):
     modelNode = self.faceGroupModelNode()
@@ -479,7 +470,7 @@ class PaintModelWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     seedCellId, localPosition, worldPosition = picked
     self._refreshBrushCursor(worldPosition)
     radius = float(self.brushRadiusSpinBox.value)
-    selected = self._brushFloodFromSeed(seedCellId, radius)
+    selected = self._brushCellsInsideSphere(seedCellId, worldPosition, radius)
     if self._brushMode == "select":
       self._faceGroupSelection.update(selected)
     else:
@@ -709,6 +700,38 @@ class PaintModelLogic(ScriptedLoadableModuleLogic):
     ScriptedLoadableModuleLogic.__init__(self)
 
   @staticmethod
+  def surfaceConnectedCellsInsideSphere(
+      cellNeighbors, cellCentroids, seedCellId, brushCenter, radius, transformPoint=None):
+    """Find the seed-connected triangle centroids inside an Euclidean sphere."""
+    if seedCellId < 0 or seedCellId >= len(cellNeighbors):
+      return set()
+    if transformPoint is None:
+      transformPoint = lambda point: point
+    radiusSquared = float(radius) ** 2
+
+    def centroidIsInsideSphere(cellId):
+      centroid = transformPoint(cellCentroids[cellId])
+      return sum(
+        (centroid[axis] - brushCenter[axis]) ** 2 for axis in range(3)) <= radiusSquared
+
+    # Always include the cell under the cursor. Its centroid can be outside a
+    # small sphere when the picked triangle is large, even though the picked
+    # surface point is at the center of the sphere.
+    selected = {seedCellId}
+    visited = {seedCellId}
+    stack = [seedCellId]
+    while stack:
+      cellId = stack.pop()
+      for neighbor in cellNeighbors[cellId]:
+        if neighbor in visited:
+          continue
+        visited.add(neighbor)
+        if centroidIsInsideSphere(neighbor):
+          selected.add(neighbor)
+          stack.append(neighbor)
+    return selected
+
+  @staticmethod
   def _cellNormal(polyData, cellId):
     cell = polyData.GetCell(cellId)
     count = cell.GetNumberOfPoints()
@@ -922,6 +945,14 @@ class PaintModelTest(ScriptedLoadableModuleTest):
     modelNode.CreateDefaultDisplayNodes()
 
     logic = PaintModelLogic()
+    selected = logic.surfaceConnectedCellsInsideSphere(
+      [{1, 2}, {0}, {0}],
+      [(0.0, 0.0, 0.0), (-0.6, 0.0, 0.0), (1.2, 0.0, 0.0)],
+      0, (0.9, 0.0, 0.0), 1.0)
+    self.assertEqual(
+      selected, {0, 2},
+      "The seed and in-sphere neighbor should be selected, but an out-of-sphere neighbor must not be")
+
     groupCount = logic.createFaceGroups(modelNode, edgeAngleThreshold=1.0, minimumGroupSize=1)
     self.assertEqual(groupCount, 6, "A cube with a tight angle threshold should yield 6 face groups")
 
