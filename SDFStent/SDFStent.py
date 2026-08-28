@@ -123,7 +123,9 @@ class SDFStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
         self.ui.updateButton.clicked.connect(self.onApplyButton)
         self.ui.updateButton.checkBoxToggled.connect(self._onUpdateButtonToggled)
+        self.ui.inputSurfaceSelector.currentNodeChanged.connect(self._onInputSurfaceChanged)
         self.ui.inputSurfaceSelector.currentNodeChanged.connect(self._checkCanApply)
+        self.ui.inputSurfaceSelector.currentSegmentChanged.connect(self._onInputSurfaceChanged)
         self.ui.inputSurfaceSelector.currentSegmentChanged.connect(self._checkCanApply)
         self.ui.inputCenterlineSelector.currentNodeChanged.connect(self._onInputCenterlineNodeChanged)
         self.ui.inputCenterlineSelector.currentNodeChanged.connect(self._checkCanApply)
@@ -191,6 +193,11 @@ class SDFStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
         self._ensureCenterPointMarkupNode()
 
         self.onSnapshotToggleChanged(self.ui.enableSnapshotsCheckBox.checked)
+
+    def _onInputSurfaceChanged(self, *unused) -> None:
+        if self._parameterNode:
+            self._parameterNode.inputVesselSegmentation = self.ui.inputSurfaceSelector.currentNode()
+            self._parameterNode.inputVesselSegmentId = self.ui.inputSurfaceSelector.currentSegmentID() or ""
 
     def _onInputCenterlineNodeChanged(self, node: vtkMRMLNode | None) -> None:
         if self._parameterNode:
@@ -401,36 +408,11 @@ class SDFStentWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
                     self._configureCenterPointMarkupNode(centerPointMarkupNode)
                     self._setCenterPointMarkupNode(centerPointMarkupNode)
 
-                outputSurfaceModelNode = self.ui.outputSurfaceSelector.currentNode()
-                if outputSurfaceModelNode is None:
-                    outputSurfaceModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "deployed_surface")
-                    self.ui.outputSurfaceSelector.setCurrentNode(outputSurfaceModelNode)
+                # Input selectors that are not bound to the parameter node via the .ui file are synced here
+                self._onInputSurfaceChanged()
+                self._onInputCenterlineNodeChanged(self.ui.inputCenterlineSelector.currentNode())
 
-                outputCenterlineModelNode = self.ui.outputCenterlineSelector.currentNode()
-                if outputCenterlineModelNode is None:
-                    outputCenterlineModelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "deployed_centerline")
-                    self.ui.outputCenterlineSelector.setCurrentNode(outputCenterlineModelNode)
-
-                outputSurfaceNode, outputCenterlineNode = self.logic.process(
-                    inputVesselSegmentation=self.ui.inputSurfaceSelector.currentNode(),
-                    inputVesselSegmentId=self.ui.inputSurfaceSelector.currentSegmentID(),
-                    inputCenterlineCurve=self.ui.inputCenterlineSelector.currentNode(),
-                    centerPointMarkup=centerPointMarkupNode,
-                    targetRadius=targetRadiusAtStart,
-                    startRadius=float(self.ui.startRadiusSpinBox.value),
-                    stentLength=float(self.ui.stentLengthSpinBox.value),
-                    enableSnapshots=bool(self.ui.enableSnapshotsCheckBox.checked),
-                    verboseLogging=bool(self.ui.verboseLoggingCheckBox.checked),
-                    saveStep=float(self.ui.saveStepSpinBox.value),
-                    preserveTemporaryFiles=bool(self.ui.preserveTempFilesCheckBox.checked),
-                    outputSurfaceModel=outputSurfaceModelNode,
-                    outputCenterlineModel=outputCenterlineModelNode,
-                    processMessageCallback=self._handleProcessMessage,
-                )
-                if outputSurfaceNode:
-                    self.ui.outputSurfaceSelector.setCurrentNode(outputSurfaceNode)
-                if outputCenterlineNode:
-                    self.ui.outputCenterlineSelector.setCurrentNode(outputCenterlineNode)
+                self.logic.process(processMessageCallback=self._handleProcessMessage)
 
                 actualRadius = self._parameterNode.actualRadius if self._parameterNode else 0.0
                 self._setStatus(_("Completed (R={radius:.2f} mm)").format(radius=actualRadius))
@@ -613,27 +595,26 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
 
         return int(pointIds[-1])
 
-    def process(
-        self,
-        inputVesselSegmentation: vtkMRMLSegmentationNode,
-        inputVesselSegmentId: str,
-        inputCenterlineCurve: vtkMRMLNode,
-        centerPointMarkup: vtkMRMLMarkupsFiducialNode,
-        targetRadius: float,
-        startRadius: float,
-        stentLength: float,
-        enableSnapshots: bool,
-        verboseLogging: bool,
-        saveStep: float,
-        preserveTemporaryFiles: bool,
-        outputSurfaceModel: vtkMRMLModelNode | None = None,
-        outputCenterlineModel: vtkMRMLModelNode | None = None,
-        processMessageCallback=None,
-    ) -> tuple[vtkMRMLModelNode, vtkMRMLModelNode]:
+    def process(self, processMessageCallback=None) -> tuple[vtkMRMLModelNode, vtkMRMLModelNode]:
+        """Run stent deployment. All inputs and parameters are taken from the module's parameter node."""
+        parameterNode = self.getParameterNode()
+        inputVesselSegmentation = parameterNode.inputVesselSegmentation
+        inputVesselSegmentId = parameterNode.inputVesselSegmentId
+        inputCenterlineCurve = parameterNode.inputCenterlineCurve
+        centerPointMarkup = parameterNode.centerPointMarkup
+        targetRadius = float(parameterNode.targetRadius)
+        startRadius = float(parameterNode.startRadius)
+        stentLength = float(parameterNode.stentLength)
+        enableSnapshots = bool(parameterNode.enableSnapshots)
+        verboseLogging = bool(parameterNode.verboseLogging)
+        saveStep = float(parameterNode.saveStep)
+        preserveTemporaryFiles = bool(parameterNode.preserveTemporaryFiles)
+
         if not inputVesselSegmentation or not inputVesselSegmentId or not inputCenterlineCurve:
             raise ValueError("Input surface segmentation/segment and centerline node are required")
         if not centerPointMarkup or centerPointMarkup.GetNumberOfControlPoints() < 1:
             raise ValueError("One center point fiducial is required")
+        startRadiusAtStart = startRadius
         if startRadius >= targetRadius:
             logging.warning("Start radius is greater than or equal to target radius. Deployment will start at target radius.")
             startRadius = targetRadius * 0.99
@@ -647,10 +628,10 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         stentLengthCm = float(stentLength) * self._mmToCm
         saveStepCm = float(saveStep) * self._mmToCm if enableSnapshots else None
 
-        outputSurfaceNodeName = "deployed_surface"
-        outputCenterlineNodeName = "deployed_centerline"
-        outputSurfaceNode = self._ensureOutputModelNode(outputSurfaceModel, outputSurfaceNodeName)
-        outputCenterlineNode = self._ensureOutputModelNode(outputCenterlineModel, outputCenterlineNodeName)
+        outputSurfaceNode = self._ensureOutputModelNode(parameterNode.outputSurfaceModel, "deployed_surface")
+        outputCenterlineNode = self._ensureOutputModelNode(parameterNode.outputCenterlineModel, "deployed_centerline")
+        parameterNode.outputSurfaceModel = outputSurfaceNode
+        parameterNode.outputCenterlineModel = outputCenterlineNode
 
         inputSurfacePolyData = self._getSegmentClosedSurfacePolyData(inputVesselSegmentation, inputVesselSegmentId)
         inputCenterlinePolyData = self._getCenterlinePolyData(inputCenterlineCurve)
@@ -732,7 +713,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 outputCenterlinePolyData = self._scaledPolyData(ctx.centerline_pd, self._cmToMm)
                 self._setDisplayedPolyData(outputSurfaceNode, outputSurfacePolyData, defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
                 self._setDisplayedPolyData(outputCenterlineNode, outputCenterlinePolyData)
-                self.getParameterNode().actualRadius = bestR * self._cmToMm
+                parameterNode.actualRadius = bestR * self._cmToMm
                 logging.info(f"Served from cache at R={bestR:.4f} cm (target={targetRadiusCm:.4f} cm)")
                 return outputSurfaceNode, outputCenterlineNode
 
@@ -814,7 +795,6 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                     data=ctx.data,
                 )
 
-            parameterNode = self.getParameterNode()
             startTime = qt.QDateTime.currentDateTimeUtc()
             iteration = 0
             t0 = time.time()
@@ -826,7 +806,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 if centerPointMarkup.GetNumberOfControlPoints() > 0:
                     centerPointMarkup.GetNthControlPointPositionWorld(0, currentCenterPos)
                 if (
-                    float(parameterNode.startRadius) != startRadius
+                    float(parameterNode.startRadius) != startRadiusAtStart
                     or float(parameterNode.stentLength) != stentLength
                     or currentCenterPos != centerPointPositionWorld
                 ):
@@ -1084,27 +1064,72 @@ class SDFStentTest(ScriptedLoadableModuleTest):
 
     def runTest(self):
         self.setUp()
-        self.test_SDFStent_smoke()
+        self.test_SDFStent_deployVessel01()
 
-    def test_SDFStent_smoke(self):
-        self.delayDisplay("Starting SDFStent smoke test")
+    def test_SDFStent_deployVessel01(self):
+        import numpy as np
+        from vtk.util.numpy_support import vtk_to_numpy
 
-        surfaceNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "surface")
-        centerlineNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", "centerline")
-        sphere = vtk.vtkSphereSource()
-        sphere.Update()
-        line = vtk.vtkLineSource()
-        line.Update()
-        surfaceNode.SetAndObservePolyData(sphere.GetOutput())
-        centerlineNode.SetAndObservePolyData(line.GetOutput())
+        if not importlib.util.find_spec("svmorph"):
+            self.delayDisplay("Installing svmorph...")
+            slicer.util.pip_install("svmorph")
 
-        import sys
-        moduleDir = os.path.dirname(slicer.util.modulePath("SDFStent"))
-        if moduleDir not in sys.path:
-            sys.path.insert(0, moduleDir)
-        from svmorph.scripts import deploy_stent
-        self.assertTrue(hasattr(deploy_stent, "main"))
+        self.delayDisplay("Loading Vessel01 sample data")
+        import SampleData
+        loadedNodes = SampleData.SampleDataLogic().downloadSamples("Vessel01")
+        segmentationNode = next(node for node in loadedNodes if node.IsA("vtkMRMLSegmentationNode"))
+        centerlineNode = next(node for node in loadedNodes if node.IsA("vtkMRMLMarkupsCurveNode"))
+        self.assertGreater(segmentationNode.GetSegmentation().GetNumberOfSegments(), 0)
+        segmentId = segmentationNode.GetSegmentation().GetNthSegmentID(0)
+
+        # Place the stent center point at the middle of the centerline curve
+        curvePoints = slicer.util.arrayFromMarkupsCurvePoints(centerlineNode, world=True)
+        self.assertGreater(len(curvePoints), 2)
+        centerPosition = curvePoints[len(curvePoints) // 2]
+        centerPointNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "CenterPoint")
+        centerPointNode.AddControlPointWorld(*[float(c) for c in centerPosition])
+
         logic = SDFStentLogic()
-        self.assertIsNotNone(logic)
+        inputSurfacePolyData = logic._getSegmentClosedSurfacePolyData(segmentationNode, segmentId)
+        inputSurfacePoints = vtk_to_numpy(inputSurfacePolyData.GetPoints().GetData())
+        inputRadiusAtCenter = np.min(np.linalg.norm(inputSurfacePoints - centerPosition, axis=1))
 
-        self.delayDisplay("SDFStent smoke test passed")
+        parameterNode = logic.getParameterNode()
+        parameterNode.inputVesselSegmentation = segmentationNode
+        parameterNode.inputVesselSegmentId = segmentId
+        parameterNode.inputCenterlineCurve = centerlineNode
+        parameterNode.centerPointMarkup = centerPointNode
+        # Target radius must exceed the local vessel radius so that the deployment visibly expands the vessel
+        parameterNode.targetRadius = 10.0
+        parameterNode.startRadius = 3.0
+        parameterNode.stentLength = 30.0
+        targetRadius = parameterNode.targetRadius
+        self.assertLess(inputRadiusAtCenter, targetRadius)
+
+        self.delayDisplay("Deploying stent")
+        outputSurfaceNode, outputCenterlineNode = logic.process()
+
+        # Output surface and centerline are valid meshes with the same topology as the input
+        outputSurfacePolyData = outputSurfaceNode.GetPolyData()
+        outputCenterlinePolyData = outputCenterlineNode.GetPolyData()
+        self.assertEqual(outputSurfacePolyData.GetNumberOfPoints(), inputSurfacePolyData.GetNumberOfPoints())
+        self.assertEqual(outputSurfacePolyData.GetNumberOfCells(), inputSurfacePolyData.GetNumberOfCells())
+        self.assertGreater(outputCenterlinePolyData.GetNumberOfPoints(), 2)
+
+        # Reported deployed radius reached the target
+        self.assertAlmostEqual(logic.getParameterNode().actualRadius, targetRadius, delta=0.5)
+
+        # The vessel wall around the center point expanded to the target radius
+        outputSurfacePoints = vtk_to_numpy(outputSurfacePolyData.GetPoints().GetData())
+        outputCenterlinePoints = vtk_to_numpy(outputCenterlinePolyData.GetPoints().GetData())
+        deployedCenterPosition = outputCenterlinePoints[np.argmin(np.linalg.norm(outputCenterlinePoints - centerPosition, axis=1))]
+        outputRadiusAtCenter = np.min(np.linalg.norm(outputSurfacePoints - deployedCenterPosition, axis=1))
+        self.assertGreater(outputRadiusAtCenter, inputRadiusAtCenter + 1.0)
+        self.assertAlmostEqual(outputRadiusAtCenter, targetRadius, delta=1.0)
+
+        # Surface far away from the stented region must remain unchanged
+        surfaceDisplacements = np.linalg.norm(outputSurfacePoints - inputSurfacePoints, axis=1)
+        farFromStentMask = np.linalg.norm(inputSurfacePoints - centerPosition, axis=1) > 30.0
+        self.assertLess(np.max(surfaceDisplacements[farFromStentMask]), 0.1)
+
+        self.delayDisplay("SDFStent Vessel01 deployment test passed")
