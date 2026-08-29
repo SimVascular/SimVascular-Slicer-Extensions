@@ -69,9 +69,9 @@ def registerSampleData():
         sampleName="Vessel01",
         thumbnailFileName=os.path.join(iconsPath, "Vessel01.jpg"),
         uris=["https://github.com/SimVascular/SlicerSimVascular/releases/download/testing-data/Vessel01_Segmentation.seg.nrrd",
-              "https://github.com/SimVascular/SlicerSimVascular/releases/download/testing-data/Vessel01_Centerline.mrk.json"],
+              "https://github.com/SimVascular/SlicerSimVascular/releases/download/testing-data/Vessel01_Centerline2.mrk.json"],
         checksums=["SHA256:a9071c6e5e37267720c9c6c3963d3a2b12a3ae1f017eebc3354c4f669629cf00",
-                   "SHA256:16faa9c7afb819dc419708edaca37eeb603fbb0fa2840c5548605b3b798fdc36"],
+                   "SHA256:0ba09b93cb50942677d68084c3f823667fb541bc334b767586023c4e417070e8"],
         fileNames=["Vessel01.seg.nrrd", "Vessel01.mrk.json"],
         nodeNames=["Vessel01 Segmentation", "Vessel01 Centerline"],
     )
@@ -101,6 +101,7 @@ class SDFStentParameterNode:
     stentLength: Annotated[float, WithinRange(0.0001, 100.0)] = 30.0
     enableSnapshots: bool = False
     verboseLogging: bool = False
+    computeOutputModelArrays: bool = False
     saveStep: Annotated[float, WithinRange(0.0001, 100.0)] = 1.0
     preserveTemporaryFiles: bool = False
     outputMeshFileName: str = "deployed_surface.vtp"
@@ -554,6 +555,123 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
             raise ValueError("Input centerline has no polydata")
         return centerlinePolyData
 
+    def _principalStrainArrays(self, polyData: vtk.vtkPolyData, currentPoints, initialPoints):
+        """Per-triangle Green-Lagrange principal strains and area strain of the surface deformation
+        from the initial to the current point positions. Returns (max, min, area) strain arrays,
+        or None if the mesh is not a pure triangle mesh. Strains are dimensionless; rigid
+        translation and rotation yield zero strain."""
+        import numpy as np
+        from vtk.util.numpy_support import vtk_to_numpy
+
+        numberOfTriangles = polyData.GetNumberOfPolys()
+        if numberOfTriangles == 0:
+            return None
+        connectivity = vtk_to_numpy(polyData.GetPolys().GetConnectivityArray())
+        if len(connectivity) != 3 * numberOfTriangles:
+            return None
+        triangles = connectivity.reshape(-1, 3)
+
+        initial = np.asarray(initialPoints, dtype=float)
+        current = np.asarray(currentPoints, dtype=float)
+        restEdge1 = initial[triangles[:, 1]] - initial[triangles[:, 0]]
+        restEdge2 = initial[triangles[:, 2]] - initial[triangles[:, 0]]
+        currentEdge1 = current[triangles[:, 1]] - current[triangles[:, 0]]
+        currentEdge2 = current[triangles[:, 2]] - current[triangles[:, 0]]
+
+        def tangentComponents(edge1, edge2):
+            # 2D components [[a, b], [0, d]] of the two edge vectors in the triangle's tangent basis
+            normal = np.cross(edge1, edge2)
+            doubleArea = np.linalg.norm(normal, axis=1)
+            u = edge1 / np.maximum(np.linalg.norm(edge1, axis=1), 1e-12)[:, None]
+            v = np.cross(normal / np.maximum(doubleArea, 1e-12)[:, None], u)
+            a = np.einsum("ij,ij->i", edge1, u)
+            b = np.einsum("ij,ij->i", edge2, u)
+            d = np.einsum("ij,ij->i", edge2, v)
+            return a, b, d, doubleArea
+
+        a, b, d, restDoubleArea = tangentComponents(restEdge1, restEdge2)
+        p, q, r, unusedCurrentDoubleArea = tangentComponents(currentEdge1, currentEdge2)
+
+        valid = (restDoubleArea > 1e-12) & (np.abs(a) > 1e-12) & (np.abs(d) > 1e-12)
+        a = np.where(valid, a, 1.0)
+        d = np.where(valid, d, 1.0)
+        # Deformation gradient F = [[p, q], [0, r]] @ inv([[a, b], [0, d]]) (upper triangular)
+        F11 = p / a
+        F12 = (q * a - p * b) / (a * d)
+        F22 = r / d
+        # Green-Lagrange strain tensor E = (F^T F - I) / 2, principal strains from its eigenvalues
+        E11 = 0.5 * (F11 * F11 - 1.0)
+        E12 = 0.5 * (F11 * F12)
+        E22 = 0.5 * (F12 * F12 + F22 * F22 - 1.0)
+        strainMean = 0.5 * (E11 + E22)
+        strainRadius = np.sqrt((0.5 * (E11 - E22)) ** 2 + E12 ** 2)
+        principalStrainMax = np.where(valid, strainMean + strainRadius, 0.0)
+        principalStrainMin = np.where(valid, strainMean - strainRadius, 0.0)
+        areaStrain = np.where(valid, F11 * F22 - 1.0, 0.0)
+        return principalStrainMax, principalStrainMin, areaStrain
+
+    def _updateOrAddArray(self, attributeData, arrayName: str, valuesFloat32) -> None:
+        """Overwrite the values of the existing array with this name if its type and shape match
+        (avoids reallocating arrays on repeated updates); otherwise add a new array."""
+        from vtk.util.numpy_support import numpy_to_vtk, vtk_to_numpy
+        numberOfComponents = valuesFloat32.shape[1] if valuesFloat32.ndim > 1 else 1
+        existingArray = attributeData.GetArray(arrayName)
+        if (existingArray is not None
+                and existingArray.GetDataType() == vtk.VTK_FLOAT
+                and existingArray.GetNumberOfComponents() == numberOfComponents
+                and existingArray.GetNumberOfTuples() == valuesFloat32.shape[0]):
+            vtk_to_numpy(existingArray)[:] = valuesFloat32
+            existingArray.Modified()
+        else:
+            newArray = numpy_to_vtk(valuesFloat32, deep=True)
+            newArray.SetName(arrayName)
+            attributeData.AddArray(newArray)
+
+    def _outputPolyData(self, polyDataCm: vtk.vtkPolyData, currentPointsCm, initialPointsCm, computeArrays: bool = False,
+                        existingPolyDataMm: vtk.vtkPolyData | None = None) -> vtk.vtkPolyData:
+        """Return polydata scaled to mm. If computeArrays is enabled, a "Displacement" point data
+        array (in mm) is added that points from each deployed point position back to its initial
+        (undeployed) position, and for triangle meshes "PrincipalStrainMax"/"PrincipalStrainMin"/
+        "AreaStrain" cell data arrays are added that characterize how much the surface stretches
+        (unlike displacement, strain is not affected by translation or rotation of the vessel wall).
+        If existingPolyDataMm (typically the output model node's current mesh) is provided and its
+        point and cell counts match, its points and data arrays are updated in place instead of
+        allocating a new polydata; only pass a mesh whose topology is known to match polyDataCm."""
+        import numpy as np
+        from vtk.util.numpy_support import vtk_to_numpy
+
+        updateInPlace = (existingPolyDataMm is not None
+                         and existingPolyDataMm.GetNumberOfPoints() == polyDataCm.GetNumberOfPoints()
+                         and existingPolyDataMm.GetNumberOfCells() == polyDataCm.GetNumberOfCells())
+        if updateInPlace:
+            outputPolyData = existingPolyDataMm
+            vtk_to_numpy(outputPolyData.GetPoints().GetData())[:] = np.asarray(currentPointsCm) * self._cmToMm
+            outputPolyData.GetPoints().GetData().Modified()
+        else:
+            outputPolyData = self._scaledPolyData(polyDataCm, self._cmToMm)
+
+        if computeArrays:
+            displacementsMm = np.ascontiguousarray(
+                (np.asarray(initialPointsCm) - np.asarray(currentPointsCm)) * self._cmToMm, dtype=np.float32)
+            self._updateOrAddArray(outputPolyData.GetPointData(), "Displacement", displacementsMm)
+            outputPolyData.GetPointData().SetActiveVectors("Displacement")
+            strainArrays = self._principalStrainArrays(outputPolyData, currentPointsCm, initialPointsCm)
+        else:
+            # Drop a stale displacement array that may remain on a reused polydata after arrays are disabled
+            outputPolyData.GetPointData().RemoveArray("Displacement")
+            strainArrays = None
+        if strainArrays is not None:
+            for arrayName, values in zip(("PrincipalStrainMax", "PrincipalStrainMin", "AreaStrain"), strainArrays):
+                self._updateOrAddArray(outputPolyData.GetCellData(), arrayName, np.ascontiguousarray(values, dtype=np.float32))
+            outputPolyData.GetCellData().SetActiveScalars("PrincipalStrainMax")
+        else:
+            # Drop stale strain arrays that may remain on a reused polydata after strain computation is disabled
+            for arrayName in ("PrincipalStrainMax", "PrincipalStrainMin", "AreaStrain"):
+                outputPolyData.GetCellData().RemoveArray(arrayName)
+        if updateInPlace:
+            outputPolyData.Modified()
+        return outputPolyData
+
     def _straightStentPolyData(self, radiusMm: float, lengthMm: float) -> vtk.vtkPolyData:
         """Cylinder surface with the given radius and length, centered at the origin, long axis along Z."""
         line = vtk.vtkLineSource()
@@ -727,8 +845,22 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         if straightStentNode and straightStentNode.GetParentTransformNode() != transformNode:
             straightStentNode.SetAndObserveTransformNodeID(transformNode.GetID())
 
+    def _setModelNodePolyData(self, node: vtkMRMLModelNode, polyData: vtk.vtkPolyData) -> None:
+        """Set the polydata on the model node, unless the node already holds this same object
+        (mesh updated in place, with Modified() invoked on the changed arrays and the polydata).
+        For in-place changes the display nodes' automatic ("data") scalar range is not recomputed
+        by any observer, so refresh it here; everything else is updated by the displayable
+        managers in response to the mesh modification event."""
+        if node.GetPolyData() is not polyData:
+            node.SetAndObservePolyData(polyData)
+            return
+        for displayNodeIndex in range(node.GetNumberOfDisplayNodes()):
+            displayNode = node.GetNthDisplayNode(displayNodeIndex)
+            if displayNode:
+                displayNode.UpdateScalarRange()
+
     def _setDisplayedPolyData(self, node: vtkMRMLModelNode, polyData: vtk.vtkPolyData, defaultOpacity: float | None = None, defaultColor: tuple[float, float, float] | None = None) -> None:
-        node.SetAndObservePolyData(polyData)
+        self._setModelNodePolyData(node, polyData)
         displayNode = node.GetDisplayNode()
         if not displayNode:
             node.CreateDefaultDisplayNodes()
@@ -803,6 +935,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         stentLength = float(parameterNode.stentLength)
         enableSnapshots = bool(parameterNode.enableSnapshots)
         verboseLogging = bool(parameterNode.verboseLogging)
+        computeArrays = bool(parameterNode.computeOutputModelArrays)
         saveStep = float(parameterNode.saveStep)
         preserveTemporaryFiles = bool(parameterNode.preserveTemporaryFiles)
 
@@ -855,6 +988,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 stentLength=stentLength,
                 enableSnapshots=enableSnapshots,
                 verboseLogging=verboseLogging,
+                computeOutputModelArrays=computeArrays,
                 saveStep=saveStep,
                 preserveTemporaryFiles=preserveTemporaryFiles,
                 outputSurfaceModel=outputSurfaceNode,
@@ -907,11 +1041,14 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 ctx.data["points"]["centerline"][:] = clPts
                 vtk_io.sync_polydata(ctx.surface_pd, ctx.data, "surface")
                 vtk_io.sync_polydata(ctx.centerline_pd, ctx.data, "centerline")
-                outputSurfacePolyData = self._scaledPolyData(ctx.surface_pd, self._cmToMm)
-                outputCenterlinePolyData = self._scaledPolyData(ctx.centerline_pd, self._cmToMm)
-                self._setDisplayedPolyData(outputSurfaceNode, outputSurfacePolyData, defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
-                self._setDisplayedPolyData(outputCenterlineNode, outputCenterlinePolyData)
-                self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, bestR, startRadius, stentLength)
+                with slicer.util.RenderBlocker():
+                    outputSurfacePolyData = self._outputPolyData(ctx.surface_pd, surfPts, ptCache[0][1], computeArrays,
+                                                                 existingPolyDataMm=outputSurfaceNode.GetPolyData())
+                    outputCenterlinePolyData = self._outputPolyData(ctx.centerline_pd, clPts, ptCache[0][2], computeArrays,
+                                                                    existingPolyDataMm=outputCenterlineNode.GetPolyData())
+                    self._setDisplayedPolyData(outputSurfaceNode, outputSurfacePolyData, defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
+                    self._setDisplayedPolyData(outputCenterlineNode, outputCenterlinePolyData)
+                    self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, bestR, startRadius, stentLength)
                 parameterNode.actualRadius = bestR * self._cmToMm
                 logging.info(f"Served from cache at R={bestR:.4f} cm (target={targetRadiusCm:.4f} cm)")
                 return outputSurfaceNode, outputCenterlineNode
@@ -969,12 +1106,13 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
             }
             self._deploymentState = state
 
-            # Show the initial (undeployed) surface immediately
-            outputSurfacePolyData = self._scaledPolyData(ctx.surface_pd, self._cmToMm)
-            outputCenterlinePolyData = self._scaledPolyData(ctx.centerline_pd, self._cmToMm)
-            self._setDisplayedPolyData(outputSurfaceNode, outputSurfacePolyData, defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
-            self._setDisplayedPolyData(outputCenterlineNode, outputCenterlinePolyData)
-            self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, startRadiusCm, startRadius, stentLength)
+            # Show the initial (undeployed) surface immediately (with zero displacements)
+            with slicer.util.RenderBlocker():
+                outputSurfacePolyData = self._outputPolyData(ctx.surface_pd, ptCache[0][1], ptCache[0][1], computeArrays)
+                outputCenterlinePolyData = self._outputPolyData(ctx.centerline_pd, ptCache[0][2], ptCache[0][2], computeArrays)
+                self._setDisplayedPolyData(outputSurfaceNode, outputSurfacePolyData, defaultOpacity=0.5, defaultColor=(1.0, 0.5, 0.0))
+                self._setDisplayedPolyData(outputCenterlineNode, outputCenterlinePolyData)
+                self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, startRadiusCm, startRadius, stentLength)
             ptCache = state["ptCache"]
             logging.info(f"Starting fresh deployment: start_R={startRadiusCm:.4f} cm, target_R={targetRadiusCm:.4f} cm")
 
@@ -1047,9 +1185,16 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 # Real-time update of output models
                 vtk_io.sync_polydata(ctx.surface_pd, ctx.data, "surface")
                 vtk_io.sync_polydata(ctx.centerline_pd, ctx.data, "centerline")
-                outputSurfaceNode.SetAndObservePolyData(self._scaledPolyData(ctx.surface_pd, self._cmToMm))
-                outputCenterlineNode.SetAndObservePolyData(self._scaledPolyData(ctx.centerline_pd, self._cmToMm))
-                self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, displayed_R, startRadius, stentLength)
+                with slicer.util.RenderBlocker():
+                    self._setModelNodePolyData(
+                        outputSurfaceNode,
+                        self._outputPolyData(ctx.surface_pd, ctx.data["points"]["surface"], ptCache[0][1], computeArrays,
+                                             existingPolyDataMm=outputSurfaceNode.GetPolyData()))
+                    self._setModelNodePolyData(
+                        outputCenterlineNode,
+                        self._outputPolyData(ctx.centerline_pd, ctx.data["points"]["centerline"], ptCache[0][2], computeArrays,
+                                             existingPolyDataMm=outputCenterlineNode.GetPolyData()))
+                    self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, displayed_R, startRadius, stentLength)
                 slicer.app.processEvents()
 
             elapsed = time.time() - t0
@@ -1058,9 +1203,16 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
             # Final update (covers the case where the loop exited on the first check)
             vtk_io.sync_polydata(ctx.surface_pd, ctx.data, "surface")
             vtk_io.sync_polydata(ctx.centerline_pd, ctx.data, "centerline")
-            outputSurfaceNode.SetAndObservePolyData(self._scaledPolyData(ctx.surface_pd, self._cmToMm))
-            outputCenterlineNode.SetAndObservePolyData(self._scaledPolyData(ctx.centerline_pd, self._cmToMm))
-            self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, ptCache[-1][0], startRadius, stentLength)
+            with slicer.util.RenderBlocker():
+                self._setModelNodePolyData(
+                    outputSurfaceNode,
+                    self._outputPolyData(ctx.surface_pd, ctx.data["points"]["surface"], ptCache[0][1], computeArrays,
+                                         existingPolyDataMm=outputSurfaceNode.GetPolyData()))
+                self._setModelNodePolyData(
+                    outputCenterlineNode,
+                    self._outputPolyData(ctx.centerline_pd, ctx.data["points"]["centerline"], ptCache[0][2], computeArrays,
+                                         existingPolyDataMm=outputCenterlineNode.GetPolyData()))
+                self._updateOptionalStentOutputs(parameterNode, axis_pts, inputCenterlineCurve, ptCache[-1][0], startRadius, stentLength)
 
             parameterNode.actualRadius = ptCache[-1][0] * self._cmToMm
             elapsedMs = startTime.msecsTo(qt.QDateTime.currentDateTimeUtc())
@@ -1166,6 +1318,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
         stentLength: float,
         enableSnapshots: bool,
         verboseLogging: bool,
+        computeOutputModelArrays: bool,
         saveStep: float,
         preserveTemporaryFiles: bool,
         outputSurfaceModel: vtkMRMLModelNode,
@@ -1197,6 +1350,7 @@ class SDFStentLogic(ScriptedLoadableModuleLogic):
                 "startPointId": startPointId,
                 "verboseLogging": verboseLogging,
                 "enableSnapshots": enableSnapshots,
+                "computeOutputModelArrays": computeOutputModelArrays,
                 "saveStep": saveStep,
             }
             with open(workDirPath / "params.json", "w") as f:
@@ -1326,6 +1480,7 @@ class SDFStentTest(ScriptedLoadableModuleTest):
         parameterNode.startRadius = 3.0
         parameterNode.targetRadius = 9.0
         parameterNode.stentLength = 45.0
+        parameterNode.computeOutputModelArrays = True
         targetRadius = parameterNode.targetRadius
         self.assertLess(inputRadiusAtCenter, targetRadius)
 
@@ -1355,6 +1510,27 @@ class SDFStentTest(ScriptedLoadableModuleTest):
         surfaceDisplacements = np.linalg.norm(outputSurfacePoints - inputSurfacePoints, axis=1)
         farFromStentMask = np.linalg.norm(inputSurfacePoints - centerPosition, axis=1) > 0.5 * parameterNode.stentLength + 20.0
         self.assertLess(np.max(surfaceDisplacements[farFromStentMask]), 0.1)
+
+        # Displacement point data arrays must point from the deployed positions back to the original positions
+        surfaceDisplacementArray = outputSurfacePolyData.GetPointData().GetArray("Displacement")
+        self.assertIsNotNone(surfaceDisplacementArray)
+        self.assertEqual(surfaceDisplacementArray.GetNumberOfComponents(), 3)
+        self.assertEqual(surfaceDisplacementArray.GetNumberOfTuples(), outputSurfacePolyData.GetNumberOfPoints())
+        np.testing.assert_allclose(vtk_to_numpy(surfaceDisplacementArray), inputSurfacePoints - outputSurfacePoints, atol=0.01)
+        centerlineDisplacementArray = outputCenterlinePolyData.GetPointData().GetArray("Displacement")
+        self.assertIsNotNone(centerlineDisplacementArray)
+        self.assertEqual(centerlineDisplacementArray.GetNumberOfComponents(), 3)
+        self.assertEqual(centerlineDisplacementArray.GetNumberOfTuples(), outputCenterlinePolyData.GetNumberOfPoints())
+
+        # Principal strain cell data: expansion inside the stented region, no strain far from it
+        principalStrainMax = vtk_to_numpy(outputSurfacePolyData.GetCellData().GetArray("PrincipalStrainMax"))
+        self.assertEqual(len(principalStrainMax), outputSurfacePolyData.GetNumberOfCells())
+        self.assertIsNotNone(outputSurfacePolyData.GetCellData().GetArray("PrincipalStrainMin"))
+        self.assertIsNotNone(outputSurfacePolyData.GetCellData().GetArray("AreaStrain"))
+        surfaceTriangles = vtk_to_numpy(outputSurfacePolyData.GetPolys().GetConnectivityArray()).reshape(-1, 3)
+        cellDistancesFromCenter = np.linalg.norm(inputSurfacePoints[surfaceTriangles].mean(axis=1) - centerPosition, axis=1)
+        self.assertGreater(np.mean(principalStrainMax[cellDistancesFromCenter < 10.0]), 0.1)
+        self.assertLess(np.max(np.abs(principalStrainMax[cellDistancesFromCenter > 0.5 * parameterNode.stentLength + 20.0])), 0.02)
 
         # Straight stent model: cylinder with start radius and stent length, centered at the origin, long axis along Z
         straightStentPolyData = parameterNode.outputStraightStentModel.GetPolyData()
