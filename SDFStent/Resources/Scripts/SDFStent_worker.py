@@ -12,6 +12,7 @@ Expects in workdir:
 Writes to workdir:
   surface_output.vtp    - deployed surface polydata (mm)
   centerline_output.vtp - deployed centerline polydata (mm)
+  stent_axis.json       - resampled stent axis points (cm)
   result.json           - {"success": bool, "error": str, "actualRadius": float}
 """
 
@@ -81,6 +82,7 @@ def main(workdir):
 
         print("Loading svmorph (jax startup may take a minute on first run)...", flush=True)
         from svmorph.core import deformation, geometry, mesh_data
+        from svmorph.core.defaults import FORESHORTENING_PERCENTAGE
         from svmorph.core.units import L, set_unit_scale
         from svmorph.logging import setup_logging as svmorph_setup_logging, TIMING
         from svmorph.scripts import common
@@ -106,8 +108,9 @@ def main(workdir):
         deformation.set_node_indices(ctx.data, [start_point_id])
         deformation.set_force_center(ctx.data, start_point_id)
 
-        foreshortening = 0.1
-        deployed_length = stent_length_cm * (1 - foreshortening)
+        # Foreshortening convention from svmorph:
+        # https://github.com/SimVascular/svMorph/blob/main/svmorph/core/defaults.py
+        deployed_length = stent_length_cm * (1 - FORESHORTENING_PERCENTAGE)
         axis_pts = geometry.resample_stent_axis(
             ctx.data["points"]["centerline_points_view_np"],
             ctx.parent_tip_map,
@@ -168,6 +171,10 @@ def main(workdir):
 
         _write_vtp(output_surface_mm, workdir / "surface_output.vtp")
         _write_vtp(output_centerline_mm, workdir / "centerline_output.vtp")
+
+        import numpy as np
+        with open(workdir / "stent_axis.json", "w") as f:
+            json.dump(np.asarray(axis_pts, dtype=float).tolist(), f)
 
         result["success"] = True
         result["actualRadius"] = displayed_R * CM_TO_MM
