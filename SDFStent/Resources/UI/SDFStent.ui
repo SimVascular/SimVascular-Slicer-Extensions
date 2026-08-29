@@ -348,13 +348,37 @@
        </widget>
       </item>
       <item row="5" column="0">
+       <widget class="QLabel" name="labelComputeOutputModelArrays">
+        <property name="text">
+         <string>Compute displacement and strain:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QCheckBox" name="computeOutputModelArraysCheckBox">
+        <property name="toolTip">
+         <string>Add data arrays to the output models:
+- Displacement (point data, mm; on the output surface and centerline models): vector pointing from each deployed point back to its initial (undeployed) position.
+- PrincipalStrainMax, PrincipalStrainMin (cell data; on the output surface model): largest and smallest Green-Lagrange principal strains of each triangle.
+- AreaStrain (cell data; on the output surface model): relative area change of each triangle.
+Unlike displacement, strain is not affected by translation or rotation of the vessel wall, so it characterizes how much the vessel wall stretches.</string>
+        </property>
+        <property name="text">
+         <string/>
+        </property>
+        <property name="SlicerParameterName" stdset="0">
+         <string>computeOutputModelArrays</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
        <widget class="QLabel" name="labelOutputStentTransform">
         <property name="text">
          <string>Output stent transform:</string>
         </property>
        </widget>
       </item>
-      <item row="5" column="1">
+      <item row="6" column="1">
        <widget class="qMRMLNodeComboBox" name="outputStentTransformSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
@@ -378,14 +402,14 @@
         </property>
        </widget>
       </item>
-      <item row="6" column="0">
+      <item row="7" column="0">
        <widget class="QLabel" name="labelOutputStraightStent">
         <property name="text">
          <string>Output straight stent model:</string>
         </property>
        </widget>
       </item>
-      <item row="6" column="1">
+      <item row="7" column="1">
        <widget class="qMRMLNodeComboBox" name="outputStraightStentSelector">
         <property name="nodeTypes">
          <stringlist notr="true">
