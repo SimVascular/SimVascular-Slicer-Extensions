@@ -1,0 +1,35 @@
+# `svremesh` is installed into Slicer by this module's CMakeLists, and pip-installed only for
+# use outside Slicer -- a headless test run, or another project importing the remesher. Neither
+# path needs the other: under Slicer the module's own directory is already on `sys.path`.
+
+[build-system]
+# 77 is where setuptools understands a PEP 639 licence expression and `license-files`,
+# which is how the Boost notice below reaches an installed wheel.
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "svremesh"
+version = "0.1.0"
+description = "Remesh a ModelFaceID-labelled surface to a uniform edge length without losing its labels"
+requires-python = ">=3.9"
+# `remesh.py` and `dynamic_mesh.py` are ports of geometry3Sharp and stay under its Boost
+# licence; the rest is the project's own. NOTICE.txt says which is which.
+license = "BSD-3-Clause AND BSL-1.0"
+license-files = ["LICENSE.txt", "NOTICE.txt"]
+authors = [{ name = "Aaron Brown" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+# Pinned to nothing: Slicer ships both, and pinning here would fight whatever the host has.
+dependencies = ["numpy", "vtk"]
+
+[project.urls]
+Homepage = "https://github.com/SimVascular/SlicerSimVascular"
+
+[tool.setuptools.packages.find]
+# The scripted module beside it is not a package, and the tests do not ship.
+include = ["svremesh*"]

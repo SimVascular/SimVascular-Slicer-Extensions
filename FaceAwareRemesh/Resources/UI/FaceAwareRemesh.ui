@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>FaceAwareRemesh</class>
+ <widget class="qMRMLWidget" name="FaceAwareRemesh">
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="ctkCollapsibleButton" name="inputsBox">
+     <property name="text">
+      <string>Surface to remesh</string>
+     </property>
+     <layout class="QFormLayout" name="inputsLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="inputLabel">
+        <property name="text">
+         <string>Input model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="qMRMLNodeComboBox" name="inputSelector">
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="addEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="removeEnabled">
+         <bool>false</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>The surface to remesh. Its ModelFaceID labels, the seams between them and the corners where they meet are all preserved. A surface with no labels is remeshed as one face.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="outputLabel">
+        <property name="text">
+         <string>Output model:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="qMRMLNodeComboBox" name="outputSelector">
+        <property name="nodeTypes">
+         <stringlist notr="true">
+          <string>vtkMRMLModelNode</string>
+         </stringlist>
+        </property>
+        <property name="addEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="renameEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="noneEnabled">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Where the remeshed surface goes. Leave this empty and a new model is created beside the input; the input is never written to, so a refused pass leaves it exactly as it was.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0" colspan="2">
+       <widget class="QPushButton" name="viewToggle">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="checkable">
+         <bool>true</bool>
+        </property>
+        <property name="text">
+         <string>Show output</string>
+        </property>
+        <property name="toolTip">
+         <string>Switch the 3D view between the original input and remeshed output. Both are colored with the same ModelFaceID colors for direct comparison.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="targetEdgeLengthLabel">
+        <property name="text">
+         <string>Target edge length (mm):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="ctkDoubleSpinBox" name="targetEdgeLength">
+        <property name="decimals">
+         <number>3</number>
+        </property>
+        <property name="minimum">
+         <double>0.010</double>
+        </property>
+        <property name="maximum">
+         <double>50.000</double>
+        </property>
+        <property name="singleStep">
+         <double>0.050</double>
+        </property>
+        <property name="value">
+         <double>1.000</double>
+        </property>
+        <property name="toolTip">
+         <string>The edge length the whole surface is driven toward. This is the one number that matters: raise it if the remesh refuses for losing a thin face, lower it to keep finer features.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="seamLabel">
+        <property name="text">
+         <string>Seams:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QComboBox" name="seamCombo">
+        <property name="toolTip">
+         <string>What happens to the curves where two faces meet. Sliding resamples each seam along its own original curve at the target edge length, which is what fixes the triangles in the seam band. Pinning holds every seam vertex exactly, which is what you need if something else will be welded to those vertices.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0" colspan="2">
+       <widget class="QPushButton" name="applyButton">
+        <property name="text">
+         <string>Remesh</string>
+        </property>
+        <property name="toolTip">
+         <string>Remesh the input into the output model. Refuses rather than degrading: a pass that would leave a degenerate triangle, tear an open boundary or remesh a face away is reported and nothing is written.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0" colspan="2">
+       <widget class="QLabel" name="report">
+        <property name="text">
+         <string/>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="advancedBox">
+     <property name="text">
+      <string>Advanced</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QFormLayout" name="advancedLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="iterationsLabel">
+        <property name="text">
+         <string>Sweeps per pass:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkSliderWidget" name="iterations">
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="minimum">
+         <double>1</double>
+        </property>
+        <property name="maximum">
+         <double>60</double>
+        </property>
+        <property name="value">
+         <double>20</double>
+        </property>
+        <property name="toolTip">
+         <string>How many split/collapse/flip/smooth sweeps to run. More sweeps get closer to a uniform edge length and cost time linearly; the surface stops changing much well before the limit.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="passesLabel">
+        <property name="text">
+         <string>Remesh passes:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkSliderWidget" name="passes">
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="minimum">
+         <double>1</double>
+        </property>
+        <property name="maximum">
+         <double>5</double>
+        </property>
+        <property name="value">
+         <double>1</double>
+        </property>
+        <property name="toolTip">
+         <string>Run the complete remesher repeatedly, using each result as the reference surface for the next pass. Use 2 when one pass leaves a face uneven; this is the same as manually remeshing the first output again and costs about twice as long.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="cornerAngleLabel">
+        <property name="text">
+         <string>Corner angle (degrees):</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="ctkSliderWidget" name="cornerAngle">
+        <property name="decimals">
+         <number>0</number>
+        </property>
+        <property name="minimum">
+         <double>0</double>
+        </property>
+        <property name="maximum">
+         <double>180</double>
+        </property>
+        <property name="value">
+         <double>45</double>
+        </property>
+        <property name="toolTip">
+         <string>How sharp a turn in a seam counts as a corner and gets pinned in place. Lower it to hold more of the seam's shape; raise it to let the remesher smooth the seam out.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="2">
+       <widget class="QCheckBox" name="smoothingToggle">
+        <property name="text">
+         <string>Smooth vertex positions between sweeps</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+        <property name="toolTip">
+         <string>Tangential smoothing, reprojected onto the original surface each sweep, which is what makes the triangles regular rather than merely the right size. Turn it off to keep vertices closer to where they started.</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0" colspan="2">
+       <widget class="QCheckBox" name="queuedToggle">
+        <property name="text">
+         <string>Queued sweep (faster on a surface already near the target)</string>
+        </property>
+        <property name="checked">
+         <bool>false</bool>
+        </property>
+        <property name="toolTip">
+         <string>Runs the queue-driven sweep instead of the full one. About 1.4 to 1.6x faster on a surface already close to its target edge length, and worse on one that is not, so it is off unless you know which you have.</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="logBox">
+     <property name="text">
+      <string>Log</string>
+     </property>
+     <property name="collapsed">
+      <bool>true</bool>
+     </property>
+     <layout class="QVBoxLayout" name="logLayout">
+      <item>
+       <widget class="QPlainTextEdit" name="log">
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <spacer name="verticalSpacer">
+     <property name="orientation">
+      <enum>Qt::Vertical</enum>
+     </property>
+    </spacer>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkDoubleSpinBox</class>
+   <extends>QWidget</extends>
+   <header>ctkDoubleSpinBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ctkSliderWidget</class>
+   <extends>QWidget</extends>
+   <header>ctkSliderWidget.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLNodeComboBox</class>
+   <extends>QWidget</extends>
+   <header>qMRMLNodeComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

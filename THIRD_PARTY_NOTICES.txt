@@ -1,0 +1,14 @@
+Third-party notices for this repository
+=======================================
+
+One module in this repository contains third-party code, and its notice is kept
+beside the code it describes rather than copied here, so that the two cannot
+drift apart:
+
+  FaceAwareRemesh -- `svremesh/remesh.py` and `svremesh/dynamic_mesh.py` are
+  Python ports of geometry3Sharp (Ryan Schmidt / gradientspace), used under the
+  Boost Software License 1.0. Attribution, the full licence text and a
+  file-by-file statement of what is ported are in FaceAwareRemesh/NOTICE.txt,
+  and both ported files repeat them in their own headers.
+
+Everything else in this repository is under LICENSE.txt.
