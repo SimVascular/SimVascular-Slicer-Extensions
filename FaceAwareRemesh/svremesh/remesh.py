@@ -138,12 +138,17 @@ DEFAULT_CORNER_ANGLE_DEGREES = 30.0
 # boundary.
 INTERIOR_TARGET_VALENCE = 6
 BOUNDARY_TARGET_VALENCE = 4
-# No operation may create a triangle worse than this unless the triangles it replaced were
-# already worse, in which case their own worst is the bound. `metrics.BAD_ASPECT_RATIO` is the
-# same number, and it is here because the `1e-12` degeneracy gate is much too permissive to
-# stand alone: a collapse that leaves three consecutive seam vertices carrying one triangle
-# between them produces a sliver of aspect 5091 whose cross-norm is still 1e-3, and one of those
-# survived the whole of case B's merged-domain remesh before this bound existed.
+# Neither a collapse nor a flip may create a triangle worse than this unless the triangles it
+# replaced were already worse, in which case their own worst is the bound.
+# `metrics.BAD_ASPECT_RATIO` is the same number, and it is here because the `1e-12` degeneracy
+# gate is much too permissive to stand alone: a collapse that leaves three consecutive seam
+# vertices carrying one triangle between them produces a sliver of aspect 5091 whose cross-norm
+# is still 1e-3, and one of those survived the whole of case B's merged-domain remesh before
+# this bound existed.
+#
+# A *split* is deliberately not bound by it. Collapse and flip are optional and a split is not:
+# refusing one leaves an edge nothing else in the loop can shorten, which deadlocked every
+# clip cap this package was handed. `Remesher._try_split` records the measurement.
 MAXIMUM_CREATED_ASPECT_RATIO = 10.0
 
 SEAM_SLIDES = "slide"
@@ -669,6 +674,32 @@ class Remesher:
     # --- split ---------------------------------------------------------------------------
 
     def _try_split(self, first, second):
+        """Halve one over-long edge -- gated on degeneracy only, and deliberately not on shape.
+
+        Collapse and flip weigh the aspect ratio of what they would create against
+        `MAXIMUM_CREATED_ASPECT_RATIO`. Split does not, and the asymmetry is the point: those
+        two are *optional* -- a refused collapse leaves a short edge the next pass may retry,
+        and a refused flip leaves the connectivity it found. A refused split leaves an edge
+        that nothing else in the loop can shorten, so the gate is not a bound on quality
+        there, it is a deadlock.
+
+        The deadlock is reachable, and a cap is where it is reached. A clip's cap arrives as
+        one polygon, and the fan `conditioning` triangulates it into is a ring of obtuse
+        triangles whose long edge is a chord of the rim; halving that chord makes the two
+        children *worse* than their parent before it makes anything better, so every split
+        across the cap was refused and the fan survived the whole remesh. Measured on a 10 mm
+        cap at a 1 mm target: 25 triangles at a worst aspect ratio of 28.6 with the gate,
+        198 at 2.8 without it, and the shape only comes right because the flips and the
+        smoothing that follow the split are what it was waiting for. The bigger the cap
+        relative to the target the worse it was, which is why it read as one outlet being
+        skipped rather than as a remesh that had stopped early.
+
+        Dropping it costs nothing that the degeneracy gate below was not already buying. A
+        split conserves area -- each child is exactly half its parent, or as near as the
+        projection of a seam midpoint onto its own curve allows -- so it cannot turn a
+        healthy triangle into a degenerate one, which is the failure the bound exists to catch
+        in a collapse.
+        """
         mesh = self.mesh
         constraint = self.constraints.edge(first, second)
         if constraint is not None and not constraint.can_split:
@@ -679,14 +710,10 @@ class Remesher:
         positions = mesh.positions
         for triangle in mesh.edge_triangles(first, second):
             apex = positions[mesh.third_vertex(triangle, first, second)]
-            smallest_cross, worst_aspect = _cross_norm_and_aspect((
+            smallest_cross, _ = _cross_norm_and_aspect((
                 (positions[first], midpoint, apex),
                 (midpoint, positions[second], apex)))
             if smallest_cross <= self.minimum_triangle_cross:
-                return False
-            limit = max(MAXIMUM_CREATED_ASPECT_RATIO,
-                        _cross_norm_and_aspect((positions[mesh.triangle(triangle)],))[1])
-            if worst_aspect > limit:
                 return False
         new_vertex, children = mesh.split_edge(first, second, midpoint)
         if constraint is not None:

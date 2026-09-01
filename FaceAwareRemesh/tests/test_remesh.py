@@ -122,6 +122,58 @@ def mesh_of(surface, groups=None):
                                    surfaces.triangle_indices(surface), groups)
 
 
+def polygon_capped_tube(radius=5.0, height=20.0, around=40, rings=20):
+    """A tube whose two caps arrive as single `VTK_POLYGON` cells, labelled 2 and 3.
+
+    Exactly what `vtkvmtkSimpleCapPolyData` -- the capper Slicer's **Clip Vessel** offers --
+    hands over, and the reason it is worth a fixture here rather than only in
+    `test_conditioning`: a cap that arrives as one polygon is *fanned* into triangles before
+    the mesh is built, and the fan is a ring of obtuse triangles whose long edge is a chord of
+    the rim. Whether the remesher can get out of that shape is a question about the remesher.
+
+    The radius is several times any target these tests use, so the cap genuinely has to be
+    refined rather than being one triangle wide already.
+    """
+    points, wall, groups = [], [], []
+    for ring in range(rings + 1):
+        z = -0.5 * height + height * ring / rings
+        for index in range(around):
+            angle = 2.0 * math.pi * index / around
+            points.append((radius * math.cos(angle), radius * math.sin(angle), z))
+    for ring in range(rings):
+        for index in range(around):
+            first, second = ring * around + index, ring * around + (index + 1) % around
+            third = (ring + 1) * around + index
+            fourth = (ring + 1) * around + (index + 1) % around
+            wall += [[first, second, fourth], [first, fourth, third]]
+            groups += [1, 1]
+
+    surface = surfaces.polydata_from_arrays(points, np.asarray(wall, dtype=np.int64))
+    cells = vtk.vtkCellArray()
+    for triangle in wall:
+        cells.InsertNextCell(3)
+        for vertex in triangle:
+            cells.InsertCellPoint(int(vertex))
+    for rim, reverse in ((list(range(around)), False),
+                         (list(range(rings * around, (rings + 1) * around)), True)):
+        cells.InsertNextCell(len(rim))
+        for vertex in (rim if reverse else reversed(rim)):
+            cells.InsertCellPoint(int(vertex))
+    surface.SetPolys(cells)
+    surfaces.stamp_face_ids(surface, np.asarray(groups + [2, 3], dtype=np.int64))
+    return surface
+
+
+def face_edge_lengths(surface, face):
+    """Every edge length of the triangles carrying one `ModelFaceID`."""
+    points = surfaces.surface_points(surface)
+    triangles = surfaces.triangle_indices(surface)[surfaces.face_ids(surface) == face]
+    return np.concatenate([
+        np.linalg.norm(points[triangles[:, (corner + 1) % 3]] - points[triangles[:, corner]],
+                       axis=1)
+        for corner in range(3)])
+
+
 def bad_edge_counts(points, triangles):
     """Free and non-manifold edge counts, the way a watertightness check asks."""
     counts = Counter()
@@ -746,6 +798,55 @@ class LabelledSurfaceRemeshTests(unittest.TestCase):
 
         self.assertLess(slid["record"]["band_after"]["band_aspect_maximum"],
                         pinned["record"]["band_after"]["band_aspect_maximum"])
+
+    def test_a_cap_that_arrived_as_one_polygon_is_refined_and_not_left_as_its_fan(self):
+        """The regression a clipped vessel showed as "one outlet was skipped".
+
+        A cap arrives as a single polygon and is fanned into obtuse triangles whose long edge
+        spans the rim. Halving such an edge makes both children *worse* than their parent
+        before the flips and the smoothing that follow make anything better -- so a split gate
+        on aspect ratio refuses every split across the cap, and the fan survives the whole
+        remesh while the wall beside it comes out at the target. Nothing else in the loop can
+        shorten those edges, which is why `_try_split` weighs degeneracy and not shape.
+
+        Stated as an edge length rather than a triangle count: the fan's chords are the width
+        of the cap, so the thing that distinguishes a refined cap from a fan is that its
+        longest edge is near the target instead of near the diameter.
+        """
+        surface = polygon_capped_tube()
+
+        outcome = remesh.remesh_labelled_surface(surface, 1.0)
+
+        for face in (2, 3):
+            lengths = face_edge_lengths(outcome["surface"], face)
+            self.assertLess(float(lengths.max()), remesh.LONG_EDGE_FRACTION * 1.0 + 1e-9,
+                            f"face {face} still carries an edge the length of the fan's chords")
+            self.assertLess(abs(float(np.median(lengths)) - 1.0), 0.2)
+
+    def test_an_over_long_edge_is_split_even_where_that_makes_the_shape_worse(self):
+        """The gate above, as the one decision it turns on, so a bound reintroduced on split
+        fails here rather than only on the cap.
+
+        A very obtuse triangle whose long edge is over the split threshold: halving it raises
+        the worst aspect ratio, and it has to happen anyway, because the alternative is an
+        edge that stays over the threshold for ever.
+        """
+        points = np.asarray([[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [9.5, 1.0, 0.0],
+                             [9.5, -1.0, 0.0]], dtype=float)
+        triangles = np.asarray([[0, 1, 2], [0, 3, 1]], dtype=np.int64)
+        midpoint = [5.0, 0.0, 0.0]
+        parent = float(remesh._aspect_ratios(points[triangles]).max())
+        halves = float(remesh._aspect_ratios(np.asarray([
+            [points[0], midpoint, points[2]], [midpoint, points[1], points[2]]])).max())
+        # The case the gate turned on: the parent is a perfectly ordinary triangle, so its own
+        # aspect ratio does not raise the bound, and halving its long edge lands well over it.
+        self.assertLess(parent, remesh.MAXIMUM_CREATED_ASPECT_RATIO)
+        self.assertGreater(halves, remesh.MAXIMUM_CREATED_ASPECT_RATIO)
+        remesher = remesh.Remesher(DynamicMesh.from_arrays(points, triangles), 1.0,
+                                   enable_collapses=False, enable_flips=False,
+                                   enable_smoothing=False)
+
+        self.assertTrue(remesher._try_split(0, 1))
 
     def test_an_unlabelled_surface_is_remeshed_without_being_given_labels(self):
         """Nothing in the pipeline hands it one, but the group machinery must not invent an
