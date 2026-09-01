@@ -1,0 +1,111 @@
+Third-party notices for FaceAwareRemesh / svremesh
+==================================================
+
+The remesher in `svremesh` is a Python port of geometry3Sharp, which is
+distributed under the Boost Software License 1.0. That licence requires the
+copyright notices in the software and the entire licence statement to be
+included in all copies and derivative works distributed other than as compiled
+object code. This file carries them for the package as a whole, and the two
+ported modules carry them again in their own headers so that neither file
+depends on this one to remain compliant if it is copied out on its own.
+
+
+geometry3Sharp
+--------------
+
+  Source:    https://github.com/gradientspace/geometry3Sharp
+  Author:    Ryan Schmidt / gradientspace <https://www.gradientspace.com>
+  Copyright: Copyright (c) Ryan Schmidt / gradientspace
+  Licence:   Boost Software License 1.0 (SPDX: BSL-1.0)
+
+Reproduced verbatim from geometry3Sharp's README, as the project's own
+statements of its licence and its authorship:
+
+  "Open-Source (Boost-license) C# library for geometric computing."
+
+  "Questions? Contact Ryan Schmidt [@rms80](http://www.twitter.com/rms80) /
+  [gradientspace](http://www.gradientspace.com)"
+
+geometry3Sharp's LICENSE file is the unmodified Boost text and carries no
+copyright line, and the source files this port was taken from -- `Remesher.cs`,
+`DMesh3.cs`, `MeshConstraints.cs` -- carry no copyright, licence or attribution
+header of any kind. So there is no upstream notice to transcribe: the copyright
+line above is written from the authorship the README states, and is included
+because attribution should travel with the code rather than because a notice
+was found and copied. If geometry3Sharp adds a notice of its own, it belongs
+here and in the two file headers, verbatim and in place of that line.
+
+
+What is ported, and what is not
+-------------------------------
+
+Ports of geometry3Sharp, and derivative works of it:
+
+  svremesh/remesh.py        from `Remesher`, `RemesherPro`, `MeshConstraints`,
+                            `MeshConstraintUtil`, `DCurveProjectionTarget` and
+                            `MeshProjectionTarget`
+  svremesh/dynamic_mesh.py  from `DMesh3`
+
+They are ports rather than copies -- the language differs, the edge storage
+differs, and several of the rules differ, each departure recorded in the
+module's own docstring -- but a port is a derivative work, and both files are
+distributed under the Boost licence terms below as well as the project's own.
+
+Original to this project, containing no geometry3Sharp code:
+
+  svremesh/__init__.py, svremesh/conditioning.py, svremesh/labelled.py,
+  svremesh/quality.py, svremesh/surfaces.py, FaceAwareRemesh.py,
+  tests/test_conditioning.py, tests/test_remesh.py
+
+The tests name geometry3Sharp classes where they state which behaviour is being
+held to the original's; they contain no ported code.
+
+
+What geometry3Sharp in turn credits to others
+---------------------------------------------
+
+Reproduced verbatim from geometry3Sharp's README:
+
+  "Many, many data structures and algorithms have been ported from the
+  WildMagic5 and GTEngine C++ libraries, which are developed by David Eberly at
+  [Geometric Tools](https://www.geometrictools.com/). WildMagic5 and GTEngine
+  are distributed under the Boost license as well, available
+  [here](https://www.geometrictools.com/Downloads/Downloads.html). Any errors in
+  code marked as ported from WildMagic5/GTEngine are most certainly ours!"
+
+  "The **MeshSignedDistanceGrid** class was implemented based on the C++
+  [SDFGen](https://github.com/christopherbatty/SDFGen) code written by
+  [Christopher Batty](https://cs.uwaterloo.ca/~c2batty/) and [Robert
+  Bridson](http://www.cs.ubc.ca/~rbridson/)."
+
+The classes ported here are geometry3Sharp's own and none of them is marked as
+ported from WildMagic5 or GTEngine; the credit is reproduced because the licence
+of those libraries is the same Boost licence and the chain of authorship should
+be visible either way. `MeshSignedDistanceGrid` is not ported here, so SDFGen's
+terms are not engaged.
+
+
+Boost Software License - Version 1.0 - August 17th, 2003
+--------------------------------------------------------
+
+Permission is hereby granted, free of charge, to any person or organization
+obtaining a copy of the software and accompanying documentation covered by
+this license (the "Software") to use, reproduce, display, distribute,
+execute, and transmit the Software, and to prepare derivative works of the
+Software, and to permit third-parties to whom the Software is furnished to
+do so, all subject to the following:
+
+The copyright notices in the Software and this entire statement, including
+the above license grant, this restriction and the following disclaimer,
+must be included in all copies of the Software, in whole or in part, and
+all derivative works of the Software, unless such copies or derivative
+works are solely in the form of machine-executable object code generated by
+a source language processor.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. IN NO EVENT
+SHALL THE COPYRIGHT HOLDERS OR ANYONE DISTRIBUTING THE SOFTWARE BE LIABLE
+FOR ANY DAMAGES OR OTHER LIABILITY, WHETHER IN CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

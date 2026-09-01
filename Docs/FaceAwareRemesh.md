@@ -12,11 +12,11 @@ face boundaries exactly where precision matters.
 ## How it works
 
 Remeshing is a Python port of [geometry3Sharp](https://github.com/gradientspace/geometry3Sharp)'s
-constrained remesher (gradientspace, Boost licence) onto a dynamic mesh of the package's own. The
-algorithm is the incremental one: a pass over every edge that splits it if it is longer than 4/3
-of the target, collapses it if it is shorter than 4/5, and otherwise flips it when that brings
-the vertex valences closer to six, followed by a Laplacian smoothing pass with every vertex
-reprojected onto the surface it started from.
+constrained remesher (gradientspace, Boost licence — see [Licence](#licence)) onto a dynamic mesh
+of the package's own. The algorithm is the incremental one: a pass over every edge that splits it
+if it is longer than 4/3 of the target, collapses it if it is shorter than 4/5, and otherwise
+flips it when that brings the vertex valences closer to six, followed by a Laplacian smoothing
+pass with every vertex reprojected onto the surface it started from.
 
 Labels survive because `ModelFaceID` *is* the mesh's triangle grouping rather than something
 looked up afterwards: a split inherits its parent triangle's group, and a collapse cannot merge
@@ -164,3 +164,11 @@ Its tests run headlessly and need only numpy and VTK:
 ```
 cd FaceAwareRemesh && PYTHONPATH=. python -m unittest discover -s tests
 ```
+
+## Licence
+
+`svremesh/remesh.py` and `svremesh/dynamic_mesh.py` are ports of
+[geometry3Sharp](https://github.com/gradientspace/geometry3Sharp) (Ryan Schmidt / gradientspace)
+and are used under the Boost Software License 1.0, whose terms and full text are in
+[`FaceAwareRemesh/NOTICE.txt`](../FaceAwareRemesh/NOTICE.txt). The rest of the module is under the
+project's own licence in [`LICENSE.txt`](../LICENSE.txt).

@@ -27,8 +27,9 @@ carrying labels.
 underneath it is the arithmetic without the reporting, and `remesh_patch_interior` is the
 variant that pins an open boundary instead of sliding along inter-face seams.
 
-The remesher is a port of geometry3Sharp's (gradientspace, Boost licence); `remesh.py`'s
-docstring records where it departs from the original and why.
+The remesher is a port of geometry3Sharp's (gradientspace, Boost licence -- `NOTICE.txt`
+beside the module has the terms, and names which files are the port); `remesh.py`'s docstring
+records where it departs from the original and why.
 """
 
 # `describe` is the right name inside the module and too general outside it, so the public

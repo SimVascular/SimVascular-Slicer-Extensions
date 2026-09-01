@@ -19,6 +19,11 @@ set(MODULE_PYTHON_SCRIPTS
 
 set(MODULE_PYTHON_RESOURCES
   Resources/UI/${MODULE_NAME}.ui
+  # `svremesh/remesh.py` and `svremesh/dynamic_mesh.py` are ports of geometry3Sharp, whose
+  # Boost licence asks that its notice travel with the source. So both files are installed
+  # rather than left behind in the checkout.
+  LICENSE.txt
+  NOTICE.txt
   )
 
 #-----------------------------------------------------------------------------

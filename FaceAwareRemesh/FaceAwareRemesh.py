@@ -89,7 +89,8 @@ class FaceAwareRemesh(ScriptedLoadableModule):
             "Paint Model has partitioned a model into face groups."
         )
         self.parent.acknowledgementText = (
-            "The remesher is a port of geometry3Sharp's (gradientspace, Boost licence)."
+            "The remesher is a port of geometry3Sharp (Ryan Schmidt / gradientspace), used "
+            "under the Boost Software License 1.0. See NOTICE.txt beside this module."
         )
 
 

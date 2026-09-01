@@ -10,6 +10,12 @@ This repository provides 3D Slicer modules for [SimVascular](https://github.com/
 - [Paint Model (PaintModel)](Docs/PaintModel.md): Interactively paint, group, and export face regions on surface models, with a face-grouping workflow inspired by Autodesk Meshmixer.
 - [Face Aware Remesh (FaceAwareRemesh)](Docs/FaceAwareRemesh.md): Remesh a surface model to a uniform edge length while keeping its `ModelFaceID` face labels, the seams between them, and the corners where they meet.
 
+## Licence
+
+This repository is under [LICENSE.txt](LICENSE.txt). One module carries ported
+third-party code under its own licence; see
+[THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).
+
 ## How to cite?
 
 See [SimVascular website](https://simvascular.github.io/).
